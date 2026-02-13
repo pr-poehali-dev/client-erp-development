@@ -53,6 +53,10 @@ export const api = {
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
     modify: (data: { loan_id: number; new_rate?: number; new_term?: number }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "modify", ...data }),
+    updatePayment: (data: { payment_id: number; payment_date?: string; amount?: number; principal_part?: number; interest_part?: number; penalty_part?: number }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
+    deletePayment: (paymentId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_payment", payment_id: paymentId }),
   },
 
   savings: {

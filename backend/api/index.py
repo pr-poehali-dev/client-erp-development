@@ -407,6 +407,48 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'new_balance': nb, 'new_schedule': ns, 'new_monthly': nm}
 
+        elif action == 'update_payment':
+            pid = int(body['payment_id'])
+            cur.execute("SELECT loan_id, amount, principal_part, interest_part, penalty_part, payment_date FROM loan_payments WHERE id=%s" % pid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Платёж не найден'}
+            lid = old[0]
+            old_principal = Decimal(str(old[2]))
+            new_date = body.get('payment_date', str(old[5]))
+            new_amount = Decimal(str(body.get('amount', float(old[1]))))
+            new_pp = Decimal(str(body.get('principal_part', float(old[2]))))
+            new_ip = Decimal(str(body.get('interest_part', float(old[3]))))
+            new_pnp = Decimal(str(body.get('penalty_part', float(old[4]))))
+            cur.execute("UPDATE loan_payments SET payment_date='%s', amount=%s, principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
+                new_date, float(new_amount), float(new_pp), float(new_ip), float(new_pnp), pid))
+            delta_principal = new_pp - old_principal
+            if delta_principal != 0:
+                cur.execute("UPDATE loans SET balance=balance-%s, updated_at=NOW() WHERE id=%s" % (float(delta_principal), lid))
+                cur.execute("SELECT balance FROM loans WHERE id=%s" % lid)
+                nb = Decimal(str(cur.fetchone()[0]))
+                if nb <= 0:
+                    cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
+                elif nb > 0:
+                    cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s" % lid)
+            audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s' % (pid, float(new_amount), float(new_pp), float(new_ip)), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_payment':
+            pid = int(body['payment_id'])
+            cur.execute("SELECT loan_id, principal_part FROM loan_payments WHERE id=%s" % pid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Платёж не найден'}
+            lid, old_pp = old[0], Decimal(str(old[1]))
+            cur.execute("DELETE FROM loan_payments WHERE id=%s" % pid)
+            if old_pp > 0:
+                cur.execute("UPDATE loans SET balance=balance+%s, status='active', updated_at=NOW() WHERE id=%s" % (float(old_pp), lid))
+            audit_log(cur, staff, 'delete_payment', 'loan', lid, '', 'Удалён платёж #%s (ОД: %s)' % (pid, float(old_pp)), ip)
+            conn.commit()
+            return {'success': True}
+
         elif action == 'modify':
             lid = int(body['loan_id'])
             cur.execute("SELECT balance, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)

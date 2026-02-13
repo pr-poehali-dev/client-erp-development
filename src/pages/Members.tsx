@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { Member } from "@/lib/api";
+import api, { Member, MemberDetail } from "@/lib/api";
 
 const columns: Column<Member>[] = [
   { key: "member_no", label: "Номер" },
@@ -46,6 +46,7 @@ const Members = () => {
   const [showForm, setShowForm] = useState(false);
   const [memberType, setMemberType] = useState("fl");
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const { toast } = useToast();
 
   const [form, setForm] = useState<Record<string, string>>({});
@@ -64,14 +65,53 @@ const Members = () => {
       m.member_no?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const openEdit = async (member: Member) => {
+    try {
+      const detail: MemberDetail = await api.members.get(member.id);
+      const formData: Record<string, string> = {};
+      const fields = [
+        'last_name', 'first_name', 'middle_name', 'birth_date', 'birth_place',
+        'inn', 'passport_series', 'passport_number', 'passport_dept_code',
+        'passport_issue_date', 'passport_issued_by', 'registration_address',
+        'phone', 'email', 'telegram', 'bank_bik', 'bank_account',
+        'marital_status', 'spouse_fio', 'spouse_phone', 'extra_phone',
+        'extra_contact_fio', 'company_name', 'director_fio', 'director_phone',
+        'contact_person_fio', 'contact_person_phone', 'status',
+      ];
+      for (const f of fields) {
+        const val = (detail as Record<string, unknown>)[f];
+        if (val != null && val !== '') formData[f] = String(val);
+      }
+      setForm(formData);
+      setMemberType(detail.member_type === "UL" ? "ul" : "fl");
+      setEditingId(detail.id);
+      setShowForm(true);
+    } catch (e) {
+      toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const openCreate = () => {
+    setForm({});
+    setEditingId(null);
+    setMemberType("fl");
+    setShowForm(true);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const data = { ...form, member_type: memberType === "fl" ? "FL" : "UL" };
-      await api.members.create(data as unknown as Record<string, string>);
-      toast({ title: "Пайщик добавлен" });
+      if (editingId) {
+        await api.members.update({ id: editingId, ...form } as unknown as Partial<MemberDetail>);
+        toast({ title: "Данные пайщика обновлены" });
+      } else {
+        const data = { ...form, member_type: memberType === "fl" ? "FL" : "UL" };
+        await api.members.create(data as unknown as Record<string, string>);
+        toast({ title: "Пайщик добавлен" });
+      }
       setShowForm(false);
       setForm({});
+      setEditingId(null);
       loadMembers();
     } catch (e: unknown) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -91,7 +131,7 @@ const Members = () => {
         description={`Всего ${members.length} пайщиков в системе`}
         actionLabel="Добавить пайщика"
         actionIcon="UserPlus"
-        onAction={() => { setForm({}); setShowForm(true); }}
+        onAction={openCreate}
       />
 
       <div className="flex items-center gap-3">
@@ -101,15 +141,15 @@ const Members = () => {
         </div>
       </div>
 
-      <DataTable columns={columns} data={filtered} emptyMessage="Пайщики не найдены. Добавьте первого пайщика." />
+      <DataTable columns={columns} data={filtered} onRowClick={openEdit} emptyMessage="Пайщики не найдены. Добавьте первого пайщика." />
 
-      <Dialog open={showForm} onOpenChange={setShowForm}>
+      <Dialog open={showForm} onOpenChange={v => { setShowForm(v); if (!v) { setEditingId(null); setForm({}); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Новый пайщик</DialogTitle></DialogHeader>
-          <Tabs value={memberType} onValueChange={setMemberType}>
+          <DialogHeader><DialogTitle>{editingId ? "Редактирование пайщика" : "Новый пайщик"}</DialogTitle></DialogHeader>
+          <Tabs value={memberType} onValueChange={editingId ? undefined : setMemberType}>
             <TabsList className="w-full">
-              <TabsTrigger value="fl" className="flex-1">Физическое лицо</TabsTrigger>
-              <TabsTrigger value="ul" className="flex-1">Юридическое лицо</TabsTrigger>
+              <TabsTrigger value="fl" className="flex-1" disabled={!!editingId}>Физическое лицо</TabsTrigger>
+              <TabsTrigger value="ul" className="flex-1" disabled={!!editingId}>Юридическое лицо</TabsTrigger>
             </TabsList>
 
             <TabsContent value="fl" className="space-y-4 mt-4">
@@ -168,11 +208,24 @@ const Members = () => {
               </div>
               <div className="space-y-1.5"><Label className="text-xs">ФИО доп. контакта</Label><Input value={form.extra_contact_fio || ""} onChange={e => setField("extra_contact_fio", e.target.value)} /></div>
 
+              {editingId && (
+                <>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
+                  <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Активен</SelectItem>
+                      <SelectItem value="blocked">Заблокирован</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
                 <Button onClick={handleSave} disabled={saving || !form.last_name || !form.inn} className="gap-2">
                   {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                  Сохранить
+                  {editingId ? "Сохранить изменения" : "Сохранить"}
                 </Button>
               </div>
             </TabsContent>
@@ -199,11 +252,24 @@ const Members = () => {
                 <div className="space-y-1.5"><Label className="text-xs">Расчётный счёт</Label><Input value={form.bank_account || ""} onChange={e => setField("bank_account", e.target.value)} maxLength={20} /></div>
               </div>
 
+              {editingId && (
+                <>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Статус</div>
+                  <Select value={form.status || "active"} onValueChange={v => setField("status", v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Активен</SelectItem>
+                      <SelectItem value="blocked">Заблокирован</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
                 <Button onClick={handleSave} disabled={saving || !form.inn || !form.company_name} className="gap-2">
                   {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                  Сохранить
+                  {editingId ? "Сохранить изменения" : "Сохранить"}
                 </Button>
               </div>
             </TabsContent>

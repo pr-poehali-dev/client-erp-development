@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
-import api, { Loan, LoanDetail, Member, ScheduleItem } from "@/lib/api";
+import api, { Loan, LoanDetail, LoanPayment, Member, ScheduleItem } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -66,6 +66,8 @@ const Loans = () => {
   const [modifyForm, setModifyForm] = useState({ new_rate: "", new_term: "" });
   const [modifyPreview, setModifyPreview] = useState<ScheduleItem[] | null>(null);
   const [modifyMonthly, setModifyMonthly] = useState(0);
+  const [showEditPayment, setShowEditPayment] = useState(false);
+  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "" });
 
   const load = () => {
     setLoading(true);
@@ -200,6 +202,55 @@ const Loans = () => {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEditPayment = (p: LoanPayment) => {
+    setEditPayForm({
+      payment_id: p.id,
+      payment_date: p.payment_date,
+      amount: String(p.amount),
+      principal_part: String(p.principal_part),
+      interest_part: String(p.interest_part),
+      penalty_part: String(p.penalty_part),
+    });
+    setShowEditPayment(true);
+  };
+
+  const handleUpdatePayment = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.loans.updatePayment({
+        payment_id: editPayForm.payment_id,
+        payment_date: editPayForm.payment_date,
+        amount: Number(editPayForm.amount),
+        principal_part: Number(editPayForm.principal_part),
+        interest_part: Number(editPayForm.interest_part),
+        penalty_part: Number(editPayForm.penalty_part),
+      });
+      toast({ title: "Платёж обновлён" });
+      setShowEditPayment(false);
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeletePayment = async (p: LoanPayment) => {
+    if (!detail || !confirm(`Удалить платёж от ${fmtDate(p.payment_date)} на сумму ${fmt(p.amount)}?`)) return;
+    try {
+      await api.loans.deletePayment(p.id);
+      toast({ title: "Платёж удалён" });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
     }
   };
 
@@ -354,15 +405,22 @@ const Loans = () => {
                           <th className="text-left py-2 px-2">Дата</th><th className="text-right py-2 px-2">Сумма</th>
                           <th className="text-right py-2 px-2">Осн. долг</th><th className="text-right py-2 px-2">Проценты</th>
                           <th className="text-right py-2 px-2">Штрафы</th><th className="text-left py-2 px-2">Тип</th>
+                          <th className="text-center py-2 px-2 w-20"></th>
                         </tr></thead>
                         <tbody>{detail.payments.map(p => (
-                          <tr key={p.id} className="border-b last:border-0">
+                          <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="py-2 px-2">{fmtDate(p.payment_date)}</td>
                             <td className="py-2 px-2 text-right font-medium">{fmt(p.amount)}</td>
                             <td className="py-2 px-2 text-right">{fmt(p.principal_part)}</td>
                             <td className="py-2 px-2 text-right">{fmt(p.interest_part)}</td>
                             <td className="py-2 px-2 text-right">{fmt(p.penalty_part)}</td>
-                            <td className="py-2 px-2 text-xs">{p.payment_type}</td>
+                            <td className="py-2 px-2 text-xs">{p.payment_type === "regular" ? "Обычный" : p.payment_type === "early_full" ? "Досрочное полное" : p.payment_type === "early_partial" ? "Досрочное частичное" : p.payment_type}</td>
+                            <td className="py-2 px-2 text-center">
+                              <div className="flex gap-1 justify-center">
+                                <button className="p-1 rounded hover:bg-muted" title="Редактировать" onClick={() => openEditPayment(p)}><Icon name="Pencil" size={14} className="text-muted-foreground" /></button>
+                                <button className="p-1 rounded hover:bg-destructive/10" title="Удалить" onClick={() => handleDeletePayment(p)}><Icon name="Trash2" size={14} className="text-destructive/70" /></button>
+                              </div>
+                            </td>
                           </tr>
                         ))}</tbody>
                       </table>
@@ -595,6 +653,28 @@ const Loans = () => {
               <Button onClick={handleModify} disabled={saving || (!modifyForm.new_rate && !modifyForm.new_term)} className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
                 Сохранить изменения
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEditPayment} onOpenChange={setShowEditPayment}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Редактирование платежа</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5"><Label className="text-xs">Дата платежа</Label><Input type="date" value={editPayForm.payment_date} onChange={e => setEditPayForm(p => ({ ...p, payment_date: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Общая сумма, ₽</Label><Input type="number" step="0.01" value={editPayForm.amount} onChange={e => setEditPayForm(p => ({ ...p, amount: e.target.value }))} /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5"><Label className="text-xs">Осн. долг, ₽</Label><Input type="number" step="0.01" value={editPayForm.principal_part} onChange={e => setEditPayForm(p => ({ ...p, principal_part: e.target.value }))} /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Проценты, ₽</Label><Input type="number" step="0.01" value={editPayForm.interest_part} onChange={e => setEditPayForm(p => ({ ...p, interest_part: e.target.value }))} /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Штрафы, ₽</Label><Input type="number" step="0.01" value={editPayForm.penalty_part} onChange={e => setEditPayForm(p => ({ ...p, penalty_part: e.target.value }))} /></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowEditPayment(false)}>Отмена</Button>
+              <Button onClick={handleUpdatePayment} disabled={saving || !editPayForm.amount} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                Сохранить
               </Button>
             </div>
           </div>
