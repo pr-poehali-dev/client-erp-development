@@ -1111,7 +1111,7 @@ def register_cyrillic_font():
     for name, fn in [('DejaVuSans', 'DejaVuSans.ttf'), ('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf')]:
         tmp = '/tmp/%s' % fn
         if not os.path.exists(tmp):
-            urllib.request.urlretrieve('https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/main/ttf/%s' % fn, tmp)
+            urllib.request.urlretrieve('https://raw.githubusercontent.com/prawnpdf/prawn/master/data/fonts/%s' % fn, tmp)
         pdfmetrics.registerFont(TTFont(name, tmp))
     _font_registered = True
     return 'DejaVuSans', 'DejaVuSans-Bold'
