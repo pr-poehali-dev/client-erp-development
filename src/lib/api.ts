@@ -86,6 +86,8 @@ export const api = {
       request<{ success: boolean; new_term: number; new_end_date: string; schedule: SavingsScheduleItem[] }>("POST", undefined, { entity: "savings", action: "modify_term", ...data }),
     backfillAccrue: (data: { saving_id: number; date_from?: string; date_to?: string }) =>
       request<{ success: boolean; days_accrued: number; total_amount: number; date_from: string; date_to: string }>("POST", undefined, { entity: "savings", action: "backfill_accrue", ...data }),
+    recalcSchedule: (savingId: number) =>
+      request<{ success: boolean; new_end_date: string }>("POST", undefined, { entity: "savings", action: "recalc_schedule", saving_id: savingId }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>

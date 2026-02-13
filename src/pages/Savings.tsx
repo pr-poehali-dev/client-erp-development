@@ -506,6 +506,20 @@ const Savings = () => {
                           : "Начислений ещё не было"}
                       </span>
                     </Button>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active" || saving} onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await api.savings.recalcSchedule(detail.id);
+                        toast({ title: "График пересчитан" });
+                        const d = await api.savings.get(detail.id);
+                        setDetail(d);
+                        load();
+                      } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                      finally { setSaving(false); }
+                    }}>
+                      <div className="flex items-center gap-2"><Icon name="RefreshCw" size={16} /><span className="font-medium text-sm">Пересчитать график</span></div>
+                      <span className="text-xs text-muted-foreground">Пересчитать даты и суммы графика</span>
+                    </Button>
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => setShowEarlyClose(true)}>
                       <div className="flex items-center gap-2"><Icon name="XCircle" size={16} /><span className="font-medium text-sm">Досрочное закрытие</span></div>
                       <span className="text-xs text-muted-foreground">Закрыть вклад до окончания срока</span>

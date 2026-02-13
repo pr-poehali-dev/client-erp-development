@@ -101,8 +101,8 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
     schedule = []
     cumulative = Decimal('0')
     for i in range(1, term + 1):
-        period_start = last_day_of_month(add_months(start_date, i - 1)) if i > 1 else start_date
-        period_end = last_day_of_month(add_months(start_date, i))
+        period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
+        period_end = last_day_of_month(add_months(start_date, i - 1))
         days_in_month = calendar.monthrange(period_end.year, period_end.month)[1]
         interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         cumulative += interest
@@ -568,7 +568,10 @@ def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_typ
     schedule = calc_savings_schedule(amount, rate, term, start_date, payout_type)
     for item in schedule:
         cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='paid'" % (sid, item['period_no']))
-        if cur.fetchone():
+        paid_row = cur.fetchone()
+        if paid_row:
+            cur.execute("UPDATE savings_schedule SET period_start='%s', period_end='%s', interest_amount=%s, cumulative_interest=%s, balance_after=%s WHERE id=%s" % (
+                item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after'], paid_row[0]))
             continue
         cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='obsolete'" % (sid, item['period_no']))
         old = cur.fetchone()
@@ -640,9 +643,9 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
             pt = body.get('payout_type', 'monthly')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
-            ed = last_day_of_month(add_months(sd, t))
             mbp = float(body.get('min_balance_pct', 0))
             schedule = calc_savings_schedule(a, r, t, sd, pt)
+            ed = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(sd, t - 1))
             cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp))
             sid = cur.fetchone()[0]
             for item in schedule:
@@ -837,12 +840,27 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if not sv:
                 return {'error': 'Вклад не найден или не активен'}
             s_amount, s_rate, s_start, s_pt = float(sv[0]), float(sv[1]), date.fromisoformat(str(sv[2])), sv[3]
-            new_end = last_day_of_month(add_months(s_start, new_term))
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
+            new_end = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(s_start, new_term - 1))
             cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
             audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес.' % new_term, ip)
             conn.commit()
             return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule}
+
+        elif action == 'recalc_schedule':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден или не активен'}
+            s_amount, s_rate, s_term = float(sv[0]), float(sv[1]), int(sv[2])
+            s_start, s_pt = date.fromisoformat(str(sv[3])), sv[4]
+            schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, s_term, s_start, s_pt)
+            new_end = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(s_start, s_term - 1))
+            cur.execute("UPDATE savings SET end_date='%s', updated_at=NOW() WHERE id=%s" % (new_end.isoformat(), sid))
+            audit_log(cur, staff, 'recalc_schedule', 'saving', sid, '', 'Пересчёт графика', ip)
+            conn.commit()
+            return {'success': True, 'schedule': schedule, 'new_end_date': new_end.isoformat()}
 
         elif action == 'auto_accrue':
             sid = int(body['saving_id'])
