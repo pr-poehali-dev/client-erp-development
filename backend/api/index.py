@@ -478,6 +478,10 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % s['member_id'])
             nr = cur.fetchone()
             s['member_name'] = nr[0] if nr else ''
+            today = date.today().isoformat()
+            cur.execute("UPDATE savings_schedule SET status='accrued' WHERE saving_id=%s AND status='pending' AND period_end <= '%s'" % (params['id'], today))
+            if cur.rowcount > 0:
+                conn.commit()
             s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % params['id'])
             s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % params['id'])
             return s
@@ -533,14 +537,12 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'interest_payout':
             sid = int(body['saving_id'])
+            period_id = body.get('period_id')
             cur.execute("SELECT payout_type, accrued_interest, paid_interest, current_balance, rate, amount FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             if not sv:
                 return {'error': 'Вклад не найден'}
             payout_type = sv[0]
-            accrued = Decimal(str(sv[1]))
-            paid = Decimal(str(sv[2]))
-            bal = Decimal(str(sv[3]))
             s_rate = Decimal(str(sv[4]))
             s_amount = Decimal(str(sv[5]))
             td = body.get('transaction_date', date.today().isoformat())
@@ -548,18 +550,39 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if payout_type == 'end_of_term':
                 return {'error': 'По данному вкладу проценты выплачиваются в конце срока'}
 
-            pay_date = date.fromisoformat(td)
-            days_in_month = calendar.monthrange(pay_date.year, pay_date.month)[1]
-            interest = (s_amount * s_rate / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if period_id:
+                cur.execute("SELECT id, interest_amount, status, period_no FROM savings_schedule WHERE id=%s AND saving_id=%s" % (int(period_id), sid))
+            else:
+                cur.execute("SELECT id, interest_amount, status, period_no FROM savings_schedule WHERE saving_id=%s AND status IN ('pending','accrued') ORDER BY period_no LIMIT 1" % sid)
+            period = cur.fetchone()
+            if not period:
+                return {'error': 'Нет неоплаченных периодов'}
 
-            if body.get('amount'):
-                interest = Decimal(str(body['amount']))
+            p_id, p_interest, p_status, p_no = period[0], Decimal(str(period[1])), period[2], period[3]
+            if p_status == 'paid':
+                return {'error': 'Период #%s уже оплачен' % p_no}
 
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_payout','Выплата процентов')" % (sid, td, float(interest)))
+            interest = Decimal(str(body['amount'])) if body.get('amount') else p_interest
+
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_payout','Выплата %% за период #%s')" % (sid, td, float(interest), p_no))
+            cur.execute("UPDATE savings_schedule SET status='paid', paid_date='%s', paid_amount=%s WHERE id=%s" % (td, float(interest), p_id))
             cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(interest), float(interest), sid))
-            audit_log(cur, staff, 'interest_payout', 'saving', sid, '', 'Выплата %%: %s' % float(interest), ip)
+            audit_log(cur, staff, 'interest_payout', 'saving', sid, '', 'Выплата %% за период #%s: %s' % (p_no, float(interest)), ip)
             conn.commit()
-            return {'success': True, 'amount': float(interest)}
+            return {'success': True, 'amount': float(interest), 'period_no': p_no}
+
+        elif action == 'auto_accrue':
+            sid = int(body['saving_id'])
+            today = date.today()
+            cur.execute("SELECT id, period_no, period_end FROM savings_schedule WHERE saving_id=%s AND status='pending' AND period_end <= '%s' ORDER BY period_no" % (sid, today.isoformat()))
+            rows = cur.fetchall()
+            count = 0
+            for r in rows:
+                cur.execute("UPDATE savings_schedule SET status='accrued' WHERE id=%s" % r[0])
+                count += 1
+            if count > 0:
+                conn.commit()
+            return {'success': True, 'accrued_count': count}
 
         elif action == 'update_transaction':
             tid = int(body['transaction_id'])

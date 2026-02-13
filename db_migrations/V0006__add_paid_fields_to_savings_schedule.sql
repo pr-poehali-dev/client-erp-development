@@ -1,0 +1,2 @@
+ALTER TABLE savings_schedule ADD COLUMN IF NOT EXISTS paid_date DATE;
+ALTER TABLE savings_schedule ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(15,2) DEFAULT 0;

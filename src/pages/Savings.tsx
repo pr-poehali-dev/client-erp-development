@@ -126,12 +126,14 @@ const Savings = () => {
     if (!detail) return;
     setSaving(true);
     try {
+      const nextPeriod = detail.schedule.find(p => p.status !== "paid");
       const res = await api.savings.interestPayout({
         saving_id: detail.id,
         amount: interestForm.amount ? Number(interestForm.amount) : undefined,
         transaction_date: interestForm.date,
+        period_id: nextPeriod?.id,
       });
-      toast({ title: "Проценты выплачены", description: fmt(res.amount) });
+      toast({ title: "Проценты выплачены", description: `Период #${res.period_no ?? "?"}: ${fmt(res.amount)}` });
       setShowInterest(false);
       await refreshDetail();
     } catch (e) {
@@ -148,6 +150,25 @@ const Savings = () => {
       const res = await api.savings.earlyClose(detail.id);
       toast({ title: "Вклад досрочно закрыт", description: `Возврат: ${fmt(res.final_amount)}` });
       setShowEarlyClose(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePayPeriod = async (period: SavingsScheduleItem) => {
+    if (!detail) return;
+    if (!confirm(`Выплатить проценты за период #${period.period_no} (${fmt(period.interest_amount)})?`)) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.interestPayout({
+        saving_id: detail.id,
+        period_id: period.id,
+        transaction_date: new Date().toISOString().slice(0, 10),
+      });
+      toast({ title: "Проценты выплачены", description: `Период #${res.period_no ?? period.period_no}: ${fmt(res.amount)}` });
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -322,19 +343,33 @@ const Savings = () => {
                           <th className="text-left py-2 px-2">N</th><th className="text-left py-2 px-2">Период</th>
                           <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Накоплено</th>
                           <th className="text-right py-2 px-2">Баланс</th><th className="text-center py-2 px-2">Статус</th>
+                          <th className="text-center py-2 px-2">Оплата</th>
+                          {detail.payout_type === "monthly" && <th className="text-center py-2 px-2 w-16"></th>}
                         </tr></thead>
                         <tbody>{detail.schedule.map(r => (
-                          <tr key={r.period_no} className="border-b last:border-0 hover:bg-muted/30">
+                          <tr key={r.period_no} className={`border-b last:border-0 hover:bg-muted/30 ${r.status === "accrued" ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
                             <td className="py-2 px-2">{r.period_no}</td>
                             <td className="py-2 px-2">{fmtDate(r.period_start)} — {fmtDate(r.period_end)}</td>
                             <td className="py-2 px-2 text-right">{fmt(r.interest_amount)}</td>
                             <td className="py-2 px-2 text-right">{fmt(r.cumulative_interest)}</td>
                             <td className="py-2 px-2 text-right font-medium">{fmt(r.balance_after)}</td>
                             <td className="py-2 px-2 text-center">
-                              <Badge variant={r.status === "paid" ? "default" : "secondary"} className="text-xs">
+                              <Badge variant={r.status === "paid" ? "default" : r.status === "accrued" ? "outline" : "secondary"} className={`text-xs ${r.status === "accrued" ? "border-amber-500 text-amber-700 dark:text-amber-400" : ""}`}>
                                 {r.status === "paid" ? "Выплачено" : r.status === "accrued" ? "Начислено" : "Ожидается"}
                               </Badge>
                             </td>
+                            <td className="py-2 px-2 text-center text-xs text-muted-foreground">
+                              {r.status === "paid" && r.paid_date ? fmtDate(r.paid_date) : "—"}
+                            </td>
+                            {detail.payout_type === "monthly" && (
+                              <td className="py-2 px-2 text-center">
+                                {r.status !== "paid" && detail.status === "active" && (
+                                  <button className="p-1 rounded hover:bg-primary/10 text-primary" title="Выплатить проценты за период" onClick={() => handlePayPeriod(r)}>
+                                    <Icon name="CircleCheck" size={16} />
+                                  </button>
+                                )}
+                              </td>
+                            )}
                           </tr>
                         ))}</tbody>
                       </table>
