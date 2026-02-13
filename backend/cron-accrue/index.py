@@ -24,15 +24,18 @@ def handler(event, context):
     try:
         accrual_date = body.get('date', date.today().isoformat())
 
-        cur.execute("SELECT id, current_balance, rate FROM savings WHERE status='active'")
+        cur.execute("SELECT id, current_balance, rate, start_date FROM savings WHERE status='active'")
         savings_rows = cur.fetchall()
         count = 0
         total = Decimal('0')
         skipped = 0
 
         for row in savings_rows:
-            s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
+            s_id, s_bal, s_rate, s_start = row[0], Decimal(str(row[1])), Decimal(str(row[2])), str(row[3])
             if s_bal <= 0:
+                skipped += 1
+                continue
+            if accrual_date <= s_start:
                 skipped += 1
                 continue
             daily_amount = (s_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)

@@ -103,8 +103,8 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
     for i in range(1, term + 1):
         period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
         period_end = last_day_of_month(add_months(start_date, i - 1))
-        days_in_month = calendar.monthrange(period_end.year, period_end.month)[1]
-        interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        actual_days = (period_end - period_start).days
+        interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(actual_days)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         cumulative += interest
         balance_after = float(amt + cumulative) if payout_type == 'end_of_term' else float(amt)
         schedule.append({
@@ -692,13 +692,15 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
         elif action == 'daily_accrue':
             today = date.today()
             accrual_date = body.get('date', today.isoformat())
-            cur.execute("SELECT id, current_balance, rate FROM savings WHERE status='active'")
+            cur.execute("SELECT id, current_balance, rate, start_date FROM savings WHERE status='active'")
             savings_rows = cur.fetchall()
             count = 0
             total = Decimal('0')
             for row in savings_rows:
-                s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
+                s_id, s_bal, s_rate, s_start = row[0], Decimal(str(row[1])), Decimal(str(row[2])), str(row[3])
                 if s_bal <= 0:
+                    continue
+                if accrual_date <= s_start:
                     continue
                 daily_amount = (s_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 if daily_amount <= 0:
@@ -734,10 +736,11 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s_rate = Decimal(str(sv[2]))
             s_start = str(sv[3])
 
+            s_start_date = date.fromisoformat(s_start)
             d = date.fromisoformat(date_from)
             d_to = date.fromisoformat(date_to)
-            if d < date.fromisoformat(s_start):
-                d = date.fromisoformat(s_start)
+            if d <= s_start_date:
+                d = s_start_date + timedelta(days=1)
 
             cur.execute("""
                 SELECT accrual_date, balance FROM savings_daily_accruals 
@@ -760,29 +763,19 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT amount FROM savings WHERE id=%s" % sid)
             initial_amount = Decimal(str(cur.fetchone()[0]))
 
-            running_bal = Decimal('0')
-            cur.execute("""
-                SELECT SUM(CASE WHEN transaction_type='deposit' THEN amount ELSE 0 END) -
-                       SUM(CASE WHEN transaction_type='withdrawal' THEN amount ELSE 0 END)
-                FROM savings_transactions WHERE saving_id=%s AND transaction_date < '%s'
-            """ % (sid, date_from))
-            pre_bal = cur.fetchone()[0]
-            if pre_bal is not None:
-                running_bal = Decimal(str(pre_bal))
-            else:
-                running_bal = initial_amount
-
-            count = 0
-            total = Decimal('0')
-            while d <= d_to:
-                ds = d.isoformat()
-                if ds in tx_by_date:
-                    for amt, tt in tx_by_date[ds]:
+            running_bal = initial_amount
+            for td_str in sorted(tx_by_date.keys()):
+                if td_str < d.isoformat():
+                    for amt, tt in tx_by_date[td_str]:
                         if tt == 'deposit':
                             running_bal += amt
                         elif tt == 'withdrawal':
                             running_bal -= amt
 
+            count = 0
+            total = Decimal('0')
+            while d <= d_to:
+                ds = d.isoformat()
                 if running_bal > 0 and ds not in existing:
                     daily_amount = (running_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                     if daily_amount > 0:
@@ -790,6 +783,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                         cur.execute("UPDATE savings SET accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(daily_amount), sid))
                         count += 1
                         total += daily_amount
+
+                if ds in tx_by_date:
+                    for amt, tt in tx_by_date[ds]:
+                        if tt == 'deposit':
+                            running_bal += amt
+                        elif tt == 'withdrawal':
+                            running_bal -= amt
 
                 d += timedelta(days=1)
 
