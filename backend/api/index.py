@@ -641,6 +641,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'opening','Открытие договора. Сумма: %s руб., ставка: %s%%, срок: %s мес.')" % (sid, sd.isoformat(), a, fmt_money(a), r, t))
             audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес., несниж.остаток: %s%%' % (a, r, t, mbp), ip)
             conn.commit()
             return {'id': sid, 'schedule': schedule}
@@ -794,7 +795,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 d += timedelta(days=1)
 
             if count > 0:
-                conn.commit()
+                cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_accrual','Начисление процентов за %s — %s (%s дн.)')" % (sid, date_to, float(total), fmt_date(date_from), fmt_date(date_to), count))
             audit_log(cur, staff, 'backfill_accrue', 'saving', sid, '', 'Период: %s — %s, дней: %s, сумма: %s' % (date_from, date_to, count, float(total)), ip)
             if count > 0:
                 conn.commit()
@@ -834,6 +835,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
             new_end = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(s_start, new_term - 1))
             cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'term_change','Изменение срока: %s мес., новая дата окончания: %s')" % (sid, date.today().isoformat(), new_term, fmt_date(new_end.isoformat())))
             audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес.' % new_term, ip)
             conn.commit()
             return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule}
@@ -1659,6 +1661,164 @@ def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     doc.build(story)
     return buf.getvalue()
 
+def generate_saving_transactions_xlsx(saving, transactions, member_name, org=None):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Выписка по транзакциям'
+
+    thin = Side(style='thin')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color='E8DAEF', end_color='E8DAEF', fill_type='solid')
+
+    row = build_xlsx_header(ws, org)
+
+    ws.merge_cells('A%d:F%d' % (row, row))
+    ws['A%d' % row] = 'Выписка по транзакциям — договор %s' % saving.get('contract_no', '')
+    ws['A%d' % row].font = Font(bold=True, size=14)
+    row += 2
+
+    ws['A%d' % row] = 'Пайщик:'
+    ws['B%d' % row] = member_name
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Сумма вклада:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Ставка:'
+    ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Срок:'
+    ws['B%d' % row] = '%s мес.' % saving.get('term_months', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Период:'
+    ws['B%d' % row] = '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date')))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Текущий баланс:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('current_balance'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    status_map = {'active': 'Активен', 'closed': 'Закрыт', 'early_closed': 'Досрочно закрыт'}
+    ws['A%d' % row] = 'Статус:'
+    ws['B%d' % row] = status_map.get(saving.get('status', ''), saving.get('status', ''))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 2
+
+    ws.column_dimensions['A'].width = 8
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 22
+    ws.column_dimensions['E'].width = 40
+
+    ws['A%d' % row] = 'ТРАНЗАКЦИИ'
+    ws['A%d' % row].font = Font(bold=True, size=12)
+    row += 1
+
+    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата процентов', 'interest_accrual': 'Начисление процентов', 'term_change': 'Изменение срока', 'rate_change': 'Изменение ставки', 'early_close': 'Досрочное закрытие', 'closing': 'Закрытие'}
+    headers = ['№', 'Дата', 'Сумма', 'Тип операции', 'Описание']
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=row, column=ci, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.border = border
+        c.alignment = Alignment(horizontal='center')
+    row += 1
+
+    running_balance = Decimal('0')
+    for idx, t in enumerate(transactions, 1):
+        tt = t.get('transaction_type', '')
+        amt = float(t.get('amount', 0))
+        ws.cell(row=row, column=1, value=idx).border = border
+        ws.cell(row=row, column=2, value=fmt_date(t.get('transaction_date'))).border = border
+        ws.cell(row=row, column=3, value=amt).border = border
+        ws.cell(row=row, column=3).number_format = '#,##0.00'
+        ws.cell(row=row, column=4, value=type_labels.get(tt, tt)).border = border
+        ws.cell(row=row, column=5, value=t.get('description', '')).border = border
+        row += 1
+
+    row += 1
+    ws['A%d' % row] = 'Всего транзакций: %d' % len(transactions)
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M')
+    ws['A%d' % row].font = Font(italic=True, color='666666')
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def generate_saving_transactions_pdf(saving, transactions, member_name, org=None):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    font_r, font_b = register_cyrillic_font()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
+    story = []
+
+    story.extend(build_pdf_header(font_r, font_b, org))
+
+    title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
+    sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
+    footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
+    desc_style = ParagraphStyle('D', fontName=font_r, fontSize=6.5, leading=8)
+
+    story.append(Paragraph('Выписка по транзакциям — договор %s' % saving.get('contract_no', ''), title_style))
+    story.append(Spacer(1, 4))
+
+    status_map = {'active': 'Активен', 'closed': 'Закрыт', 'early_closed': 'Досрочно закрыт'}
+    info = [
+        ['Пайщик:', member_name, 'Сумма:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Ставка:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
+        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Баланс:', '%s руб.' % fmt_money(saving.get('current_balance'))],
+        ['Статус:', status_map.get(saving.get('status', ''), saving.get('status', '')), '', ''],
+    ]
+    it = Table(info, colWidths=[55, 150, 55, 150])
+    it.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (2, 0), (2, -1), font_b),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2), ('TOPPADDING', (0, 0), (-1, -1), 1),
+    ]))
+    story.append(it)
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Транзакции', sub_style))
+    type_labels = {'opening': 'Открытие', 'deposit': 'Пополнение', 'withdrawal': 'Частичное изъятие', 'interest_payout': 'Выплата %', 'interest_accrual': 'Начисление %', 'term_change': 'Изм. срока', 'rate_change': 'Изм. ставки', 'early_close': 'Досрочное закр.', 'closing': 'Закрытие'}
+    tdata = [['№', 'Дата', 'Сумма', 'Тип', 'Описание']]
+    for idx, t in enumerate(transactions, 1):
+        tt = t.get('transaction_type', '')
+        desc_text = t.get('description', '') or ''
+        tdata.append([str(idx), fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
+                       type_labels.get(tt, tt), Paragraph(desc_text, desc_style)])
+    tt_table = Table(tdata, colWidths=[22, 58, 68, 75, 170], repeatRows=1)
+    tt_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8daef')),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'), ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f0fc')]),
+    ]))
+    story.append(tt_table)
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph('Всего транзакций: %d' % len(transactions), ParagraphStyle('C', fontName=font_b, fontSize=8)))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
+    doc.build(story)
+    return buf.getvalue()
+
 def generate_shares_xlsx(account, transactions, member_name, org=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -1829,6 +1989,23 @@ def handle_export(params, cur):
             data = generate_savings_xlsx(saving, schedule, transactions, member_name, org)
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'saving_%s.xlsx' % saving.get('contract_no', item_id)
+
+    elif export_type == 'saving_transactions':
+        saving = query_one(cur, "SELECT * FROM savings WHERE id = %s" % item_id)
+        if not saving:
+            return None
+        cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % saving['member_id'])
+        nr = cur.fetchone()
+        member_name = nr[0] if nr else ''
+        transactions = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date, id" % item_id)
+        if format_ == 'pdf':
+            data = generate_saving_transactions_pdf(saving, transactions, member_name, org)
+            ct = 'application/pdf'
+            fn = 'transactions_%s.pdf' % saving.get('contract_no', item_id)
+        else:
+            data = generate_saving_transactions_xlsx(saving, transactions, member_name, org)
+            ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            fn = 'transactions_%s.xlsx' % saving.get('contract_no', item_id)
 
     elif export_type == 'share':
         account = query_one(cur, "SELECT * FROM share_accounts WHERE id = %s" % item_id)

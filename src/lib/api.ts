@@ -111,7 +111,7 @@ export const api = {
   },
 
   export: {
-    download: async (type: "loan" | "saving" | "share", id: number, format: "xlsx" | "pdf") => {
+    download: async (type: "loan" | "saving" | "share" | "saving_transactions", id: number, format: "xlsx" | "pdf") => {
       const res = await request<ExportResult>("GET", { entity: "export", type, id, format });
       const binary = atob(res.file);
       const bytes = new Uint8Array(binary.length);

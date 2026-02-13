@@ -17,7 +17,7 @@ import api, { Saving, SavingDetail, SavingTransaction, Member, SavingsScheduleIt
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
-const ttLabels: Record<string, string> = { deposit: "Пополнение", withdrawal: "Снятие", interest_payout: "Выплата %", early_close: "Досрочное закрытие" };
+const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие" };
 
 const columns: Column<Saving>[] = [
   { key: "contract_no", label: "Договор", className: "font-medium" },
@@ -411,7 +411,7 @@ const Savings = () => {
               <Tabs defaultValue="schedule">
                 <TabsList>
                   <TabsTrigger value="schedule">Плановый график</TabsTrigger>
-                  <TabsTrigger value="transactions">Операции ({detail.transactions.length})</TabsTrigger>
+                  <TabsTrigger value="transactions">Транзакции ({detail.transactions.length})</TabsTrigger>
                   <TabsTrigger value="actions">Действия</TabsTrigger>
                 </TabsList>
 
@@ -447,35 +447,65 @@ const Savings = () => {
                 </TabsContent>
 
                 <TabsContent value="transactions" className="mt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm text-muted-foreground">
+                      Всего транзакций: <span className="font-medium text-foreground">{detail.transactions.length}</span>
+                    </div>
+                    {detail.transactions.length > 0 && (
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "xlsx"); toast({ title: "Формируется Excel-выписка по транзакциям..." }); }}>
+                          <Icon name="FileSpreadsheet" size={14} className="text-green-600" />
+                          <span className="text-xs">Excel</span>
+                        </Button>
+                        <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "pdf"); toast({ title: "Формируется PDF-выписка по транзакциям..." }); }}>
+                          <Icon name="FileText" size={14} className="text-red-500" />
+                          <span className="text-xs">PDF</span>
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                   {detail.transactions.length === 0 ? (
-                    <Card className="p-6 text-center text-muted-foreground text-sm">Операций пока нет</Card>
+                    <Card className="p-6 text-center text-muted-foreground text-sm">Транзакций пока нет</Card>
                   ) : (
                     <Card><CardContent className="pt-4">
+                      <div className="overflow-x-auto max-h-96 overflow-y-auto">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b text-xs text-muted-foreground">
+                          <th className="text-left py-2 px-2 w-8">№</th>
                           <th className="text-left py-2 px-2">Дата</th><th className="text-right py-2 px-2">Сумма</th>
                           <th className="text-left py-2 px-2">Тип</th><th className="text-left py-2 px-2">Описание</th>
                           <th className="text-center py-2 px-2 w-20"></th>
                         </tr></thead>
-                        <tbody>{detail.transactions.map(tx => (
+                        <tbody>{detail.transactions.map((tx, idx) => (
                           <tr key={tx.id} className="border-b last:border-0 hover:bg-muted/30">
+                            <td className="py-2 px-2 text-xs text-muted-foreground">{idx + 1}</td>
                             <td className="py-2 px-2">{fmtDate(tx.transaction_date)}</td>
-                            <td className="py-2 px-2 text-right font-medium">{fmt(tx.amount)}</td>
+                            <td className="py-2 px-2 text-right font-medium">{tx.amount > 0 ? fmt(tx.amount) : "—"}</td>
                             <td className="py-2 px-2">
-                              <Badge variant={tx.transaction_type === "deposit" ? "default" : tx.transaction_type === "interest_payout" ? "secondary" : "outline"} className="text-xs">
+                              <Badge variant={
+                                tx.transaction_type === "opening" ? "default" :
+                                tx.transaction_type === "deposit" ? "default" :
+                                tx.transaction_type === "interest_payout" ? "secondary" :
+                                tx.transaction_type === "interest_accrual" ? "secondary" :
+                                tx.transaction_type === "withdrawal" || tx.transaction_type === "early_close" ? "destructive" :
+                                "outline"
+                              } className="text-xs">
                                 {ttLabels[tx.transaction_type] || tx.transaction_type}
                               </Badge>
                             </td>
-                            <td className="py-2 px-2 text-xs text-muted-foreground">{tx.description}</td>
+                            <td className="py-2 px-2 text-xs text-muted-foreground max-w-[200px] truncate" title={tx.description}>{tx.description}</td>
                             <td className="py-2 px-2 text-center">
+                              {!["opening", "interest_accrual", "term_change", "rate_change"].includes(tx.transaction_type) && (
                               <div className="flex gap-1 justify-center">
                                 <button className="p-1 rounded hover:bg-muted" title="Редактировать" onClick={() => openEditTx(tx)}><Icon name="Pencil" size={14} className="text-muted-foreground" /></button>
                                 <button className="p-1 rounded hover:bg-destructive/10" title="Удалить" onClick={() => handleDeleteTx(tx)}><Icon name="Trash2" size={14} className="text-destructive/70" /></button>
                               </div>
+                              )}
                             </td>
                           </tr>
                         ))}</tbody>
                       </table>
+                      </div>
                     </CardContent></Card>
                   )}
                 </TabsContent>
