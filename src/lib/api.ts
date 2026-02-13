@@ -78,8 +78,12 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_contract", saving_id: savingId }),
     deleteAllTransactions: (savingId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_all_transactions", saving_id: savingId }),
-    interestPayout: (data: { saving_id: number; amount?: number; transaction_date?: string; period_id?: number }) =>
-      request<{ success: boolean; amount: number; period_no?: number }>("POST", undefined, { entity: "savings", action: "interest_payout", ...data }),
+    interestPayout: (data: { saving_id: number; amount?: number; transaction_date?: string }) =>
+      request<{ success: boolean; amount: number; max_payout: number }>("POST", undefined, { entity: "savings", action: "interest_payout", ...data }),
+    partialWithdrawal: (data: { saving_id: number; amount: number; transaction_date?: string }) =>
+      request<{ success: boolean; new_balance: number; min_balance: number }>("POST", undefined, { entity: "savings", action: "partial_withdrawal", ...data }),
+    modifyTerm: (data: { saving_id: number; new_term: number }) =>
+      request<{ success: boolean; new_term: number; new_end_date: string; schedule: SavingsScheduleItem[] }>("POST", undefined, { entity: "savings", action: "modify_term", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>
@@ -296,6 +300,7 @@ export interface Saving {
   paid_interest: number;
   current_balance: number;
   status: string;
+  min_balance_pct: number;
 }
 
 export interface SavingsScheduleItem {
@@ -314,6 +319,8 @@ export interface SavingsScheduleItem {
 export interface SavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
   transactions: SavingTransaction[];
+  total_daily_accrued: number;
+  max_payout: number;
 }
 
 export interface SavingTransaction {
@@ -333,6 +340,7 @@ export interface CreateSavingData {
   term_months: number;
   payout_type: string;
   start_date: string;
+  min_balance_pct?: number;
 }
 
 export interface ShareAccount {
@@ -400,6 +408,7 @@ export interface CabinetOverview {
 
 export interface CabinetSavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
+  total_daily_accrued: number;
 }
 
 export interface StaffLoginResult {

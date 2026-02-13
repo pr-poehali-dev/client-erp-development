@@ -354,10 +354,11 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => (
 
 const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
   <div className="space-y-4">
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
       <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="text-sm font-medium">{fmt(saving.amount)}</div></div>
       <div><div className="text-xs text-muted-foreground">Ставка</div><div className="text-sm font-medium">{saving.rate}%</div></div>
-      <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="text-sm font-medium text-green-600">{fmt(saving.accrued_interest)}</div></div>
+      <div><div className="text-xs text-muted-foreground">Начислено % (факт.)</div><div className="text-sm font-medium text-green-600">{fmt(saving.total_daily_accrued || 0)}</div></div>
+      <div><div className="text-xs text-muted-foreground">Выплачено %</div><div className="text-sm font-medium">{fmt(saving.paid_interest)}</div></div>
       <div><div className="text-xs text-muted-foreground">Баланс</div><div className="text-sm font-bold text-primary">{fmt(saving.current_balance || saving.amount)}</div></div>
     </div>
     <div className="text-xs text-muted-foreground">
@@ -365,13 +366,19 @@ const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
     </div>
 
     <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-sm">График доходности</CardTitle></CardHeader>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Icon name="Info" size={14} className="text-blue-500" />
+          Плановый график доходности
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">Информационный график. Фактические проценты начисляются ежедневно на остаток.</p>
+      </CardHeader>
       <CardContent>
         <div className="overflow-x-auto max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 sticky top-0"><tr className="text-xs text-muted-foreground">
               <th className="text-left py-2 px-3">N</th><th className="text-left py-2 px-3">Период</th>
-              <th className="text-right py-2 px-3">Проценты</th><th className="text-right py-2 px-3">Накоплено</th>
+              <th className="text-right py-2 px-3">Проценты (план)</th><th className="text-right py-2 px-3">Накоплено</th>
               <th className="text-right py-2 px-3">Баланс</th>
             </tr></thead>
             <tbody>{saving.schedule.map((r: SavingsScheduleItem) => (

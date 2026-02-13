@@ -26,6 +26,7 @@ const columns: Column<Saving>[] = [
   { key: "rate", label: "Ставка", render: (i: Saving) => i.rate + "%" },
   { key: "term_months", label: "Срок", render: (i: Saving) => i.term_months + " мес." },
   { key: "accrued_interest", label: "Начислено %", render: (i: Saving) => fmt(i.accrued_interest) },
+  { key: "min_balance_pct", label: "Несниж.%", render: (i: Saving) => <span className="text-xs">{i.min_balance_pct > 0 ? i.min_balance_pct + "%" : "—"}</span> },
   { key: "payout_type", label: "Выплата", render: (i: Saving) => <span className="text-xs">{i.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</span> },
   { key: "end_date", label: "Окончание", render: (i: Saving) => fmtDate(i.end_date) },
   { key: "status", label: "Статус", render: (i: Saving) => <Badge variant={i.status === "active" ? "default" : "secondary"} className="text-xs">{i.status === "active" ? "Активен" : i.status === "early_closed" ? "Досрочно" : "Закрыт"}</Badge> },
@@ -58,7 +59,12 @@ const Savings = () => {
   const [showEditTx, setShowEditTx] = useState(false);
   const [editTxForm, setEditTxForm] = useState({ transaction_id: 0, amount: "", transaction_date: "", description: "" });
 
-  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10) });
+  const [showWithdrawal, setShowWithdrawal] = useState(false);
+  const [withdrawalForm, setWithdrawalForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
+  const [showModifyTerm, setShowModifyTerm] = useState(false);
+  const [modifyTermForm, setModifyTermForm] = useState({ new_term: "" });
+
+  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "" });
 
   const load = () => {
     setLoading(true);
@@ -81,6 +87,7 @@ const Savings = () => {
         contract_no: form.contract_no, member_id: Number(form.member_id),
         amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
         payout_type: form.payout_type, start_date: form.start_date,
+        min_balance_pct: form.min_balance_pct ? Number(form.min_balance_pct) : 0,
       });
       toast({ title: "Договор сбережений создан" });
       setShowForm(false);
@@ -128,14 +135,12 @@ const Savings = () => {
     if (!detail) return;
     setSaving(true);
     try {
-      const nextPeriod = detail.schedule.find(p => p.status !== "paid");
       const res = await api.savings.interestPayout({
         saving_id: detail.id,
         amount: interestForm.amount ? Number(interestForm.amount) : undefined,
         transaction_date: interestForm.date,
-        period_id: nextPeriod?.id,
       });
-      toast({ title: "Проценты выплачены", description: `Период #${res.period_no ?? "?"}: ${fmt(res.amount)}` });
+      toast({ title: "Проценты выплачены", description: fmt(res.amount) });
       setShowInterest(false);
       await refreshDetail();
     } catch (e) {
@@ -160,17 +165,31 @@ const Savings = () => {
     }
   };
 
-  const handlePayPeriod = async (period: SavingsScheduleItem) => {
-    if (!detail) return;
-    if (!confirm(`Выплатить проценты за период #${period.period_no} (${fmt(period.interest_amount)})?`)) return;
+  const handlePartialWithdrawal = async () => {
+    if (!detail || !withdrawalForm.amount) return;
     setSaving(true);
     try {
-      const res = await api.savings.interestPayout({
-        saving_id: detail.id,
-        period_id: period.id,
-        transaction_date: new Date().toISOString().slice(0, 10),
+      const res = await api.savings.partialWithdrawal({
+        saving_id: detail.id, amount: Number(withdrawalForm.amount),
+        transaction_date: withdrawalForm.date,
       });
-      toast({ title: "Проценты выплачены", description: `Период #${res.period_no ?? period.period_no}: ${fmt(res.amount)}` });
+      toast({ title: "Частичное изъятие проведено", description: `Новый баланс: ${fmt(res.new_balance)}` });
+      setShowWithdrawal(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleModifyTerm = async () => {
+    if (!detail || !modifyTermForm.new_term) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.modifyTerm({ saving_id: detail.id, new_term: Number(modifyTermForm.new_term) });
+      toast({ title: "Срок изменён", description: `Новый срок: ${res.new_term} мес., окончание: ${fmtDate(res.new_end_date)}` });
+      setShowModifyTerm(false);
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -257,7 +276,7 @@ const Savings = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Сбережения" description={`${items.filter(s => s.status === "active").length} активных договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10) }); setPreview(null); setShowForm(true); }} />
+      <PageHeader title="Сбережения" description={`${items.filter(s => s.status === "active").length} активных договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "" }); setPreview(null); setShowForm(true); }} />
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Общая сумма вкладов</div><div className="text-xl font-bold">{fmt(totalSavings)}</div></Card>
@@ -301,6 +320,11 @@ const Savings = () => {
                 </Select>
               </div>
               <div className="space-y-1.5"><Label className="text-xs">Дата начала</Label><Input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} /></div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Неснижаемый остаток, % от суммы (0 = изъятие запрещено)</Label>
+              <Input type="number" min="0" max="100" step="1" placeholder="0" value={form.min_balance_pct} onChange={e => setForm(p => ({ ...p, min_balance_pct: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Если указан процент {">"}0, клиент сможет частично снимать средства, но не ниже неснижаемого остатка</p>
             </div>
 
             <Button variant="outline" onClick={handleCalc} className="gap-2"><Icon name="Calculator" size={16} />Рассчитать график</Button>
@@ -355,55 +379,45 @@ const Savings = () => {
                 <div><div className="text-xs text-muted-foreground">Выплата %</div><div className="text-sm font-medium">{detail.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div></div>
                 <div><div className="text-xs text-muted-foreground">Баланс</div><div className="text-sm font-bold text-primary">{fmt(detail.current_balance)}</div></div>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-5 gap-4">
                 <div><div className="text-xs text-muted-foreground">Срок</div><div className="text-sm">{detail.term_months} мес.</div></div>
                 <div><div className="text-xs text-muted-foreground">Период</div><div className="text-sm">{fmtDate(detail.start_date)} — {fmtDate(detail.end_date)}</div></div>
-                <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="text-sm">{fmt(detail.accrued_interest)}</div></div>
+                <div><div className="text-xs text-muted-foreground">Начислено % (факт.)</div><div className="text-sm font-medium text-green-600">{fmt(detail.total_daily_accrued)}</div></div>
                 <div><div className="text-xs text-muted-foreground">Выплачено %</div><div className="text-sm">{fmt(detail.paid_interest)}</div></div>
+                <div><div className="text-xs text-muted-foreground">Несниж. остаток</div><div className="text-sm">{detail.min_balance_pct > 0 ? `${detail.min_balance_pct}% (${fmt(detail.amount * detail.min_balance_pct / 100)})` : "Не установлен"}</div></div>
               </div>
 
               <Tabs defaultValue="schedule">
                 <TabsList>
-                  <TabsTrigger value="schedule">График доходности</TabsTrigger>
+                  <TabsTrigger value="schedule">Плановый график</TabsTrigger>
                   <TabsTrigger value="transactions">Операции ({detail.transactions.length})</TabsTrigger>
                   <TabsTrigger value="actions">Действия</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="schedule" className="mt-4">
-                  <Card><CardContent className="pt-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Icon name="Info" size={14} className="text-blue-500" />
+                        Плановый график доходности (информационный)
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground">Отражает плановые начисления. Фактические проценты начисляются ежедневно на остаток.</p>
+                    </CardHeader>
+                    <CardContent className="pt-2">
                     <div className="overflow-x-auto max-h-96 overflow-y-auto">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b text-xs text-muted-foreground">
                           <th className="text-left py-2 px-2">N</th><th className="text-left py-2 px-2">Период</th>
-                          <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Накоплено</th>
-                          <th className="text-right py-2 px-2">Баланс</th><th className="text-center py-2 px-2">Статус</th>
-                          <th className="text-center py-2 px-2">Оплата</th>
-                          {detail.payout_type === "monthly" && <th className="text-center py-2 px-2 w-16"></th>}
+                          <th className="text-right py-2 px-2">Проценты (план)</th><th className="text-right py-2 px-2">Накоплено</th>
+                          <th className="text-right py-2 px-2">Баланс</th>
                         </tr></thead>
                         <tbody>{detail.schedule.map(r => (
-                          <tr key={r.period_no} className={`border-b last:border-0 hover:bg-muted/30 ${r.status === "accrued" ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                          <tr key={r.period_no} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="py-2 px-2">{r.period_no}</td>
                             <td className="py-2 px-2">{fmtDate(r.period_start)} — {fmtDate(r.period_end)}</td>
                             <td className="py-2 px-2 text-right">{fmt(r.interest_amount)}</td>
                             <td className="py-2 px-2 text-right">{fmt(r.cumulative_interest)}</td>
                             <td className="py-2 px-2 text-right font-medium">{fmt(r.balance_after)}</td>
-                            <td className="py-2 px-2 text-center">
-                              <Badge variant={r.status === "paid" ? "default" : r.status === "accrued" ? "outline" : "secondary"} className={`text-xs ${r.status === "accrued" ? "border-amber-500 text-amber-700 dark:text-amber-400" : ""}`}>
-                                {r.status === "paid" ? "Выплачено" : r.status === "accrued" ? "Начислено" : "Ожидается"}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-2 text-center text-xs text-muted-foreground">
-                              {r.status === "paid" && r.paid_date ? fmtDate(r.paid_date) : "—"}
-                            </td>
-                            {detail.payout_type === "monthly" && (
-                              <td className="py-2 px-2 text-center">
-                                {r.status !== "paid" && detail.status === "active" && (
-                                  <button className="p-1 rounded hover:bg-primary/10 text-primary" title="Выплатить проценты за период" onClick={() => handlePayPeriod(r)}>
-                                    <Icon name="CircleCheck" size={16} />
-                                  </button>
-                                )}
-                              </td>
-                            )}
                           </tr>
                         ))}</tbody>
                       </table>
@@ -449,11 +463,19 @@ const Savings = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => { setDepositForm({ amount: "", date: new Date().toISOString().slice(0, 10), is_cash: false }); setShowDeposit(true); }}>
                       <div className="flex items-center gap-2"><Icon name="PlusCircle" size={16} /><span className="font-medium text-sm">Пополнить вклад</span></div>
-                      <span className="text-xs text-muted-foreground">Внести дополнительные средства</span>
+                      <span className="text-xs text-muted-foreground">Внести дополнительные средства (график пересчитается)</span>
                     </Button>
-                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active" || detail.payout_type !== "monthly"} onClick={() => { setInterestForm({ amount: "", date: new Date().toISOString().slice(0, 10) }); setShowInterest(true); }}>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active" || detail.max_payout <= 0} onClick={() => { setInterestForm({ amount: "", date: new Date().toISOString().slice(0, 10) }); setShowInterest(true); }}>
                       <div className="flex items-center gap-2"><Icon name="Percent" size={16} /><span className="font-medium text-sm">Выплатить проценты</span></div>
-                      <span className="text-xs text-muted-foreground">{detail.payout_type === "monthly" ? "Ежемесячная выплата процентов" : "Проценты в конце срока"}</span>
+                      <span className="text-xs text-muted-foreground">К выплате: {fmt(detail.max_payout)} (на конец пред. месяца)</span>
+                    </Button>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active" || detail.min_balance_pct <= 0} onClick={() => { setWithdrawalForm({ amount: "", date: new Date().toISOString().slice(0, 10) }); setShowWithdrawal(true); }}>
+                      <div className="flex items-center gap-2"><Icon name="ArrowDownCircle" size={16} /><span className="font-medium text-sm">Частичное изъятие</span></div>
+                      <span className="text-xs text-muted-foreground">{detail.min_balance_pct > 0 ? `Мин. остаток: ${fmt(detail.amount * detail.min_balance_pct / 100)}` : "Не предусмотрено договором"}</span>
+                    </Button>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => { setModifyTermForm({ new_term: String(detail.term_months) }); setShowModifyTerm(true); }}>
+                      <div className="flex items-center gap-2"><Icon name="CalendarClock" size={16} /><span className="font-medium text-sm">Изменить срок</span></div>
+                      <span className="text-xs text-muted-foreground">Текущий: {detail.term_months} мес. (график пересчитается)</span>
                     </Button>
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => setShowEarlyClose(true)}>
                       <div className="flex items-center gap-2"><Icon name="XCircle" size={16} /><span className="font-medium text-sm">Досрочное закрытие</span></div>
@@ -519,21 +541,30 @@ const Savings = () => {
           <DialogHeader><DialogTitle>Выплата процентов</DialogTitle></DialogHeader>
           <div className="space-y-4">
             {detail && (
-              <Card className="p-3 bg-muted/50">
+              <Card className="p-3 bg-muted/50 space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Ставка:</span>
                   <span className="font-semibold">{detail.rate}% годовых</span>
                 </div>
-                <div className="flex justify-between text-sm mt-1">
-                  <span className="text-muted-foreground">Начислено / Выплачено:</span>
-                  <span className="font-medium">{fmt(detail.accrued_interest)} / {fmt(detail.paid_interest)}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Начислено (факт.):</span>
+                  <span className="font-medium text-green-600">{fmt(detail.total_daily_accrued)}</span>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Уже выплачено:</span>
+                  <span className="font-medium">{fmt(detail.paid_interest)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t pt-1">
+                  <span className="text-muted-foreground font-medium">К выплате (макс.):</span>
+                  <span className="font-bold text-primary">{fmt(detail.max_payout)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">Лимит = начислено на последний день прошлого месяца минус уже выплаченное</p>
               </Card>
             )}
             <div className="space-y-1.5"><Label className="text-xs">Дата выплаты</Label><Input type="date" value={interestForm.date} onChange={e => setInterestForm(p => ({ ...p, date: e.target.value }))} /></div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Сумма, \u20BD (оставьте пустым для авторасчёта)</Label>
-              <Input type="number" step="0.01" value={interestForm.amount} onChange={e => setInterestForm(p => ({ ...p, amount: e.target.value }))} placeholder="Автоматический расчёт" />
+              <Label className="text-xs">Сумма, \u20BD (оставьте пустым = макс. допустимая)</Label>
+              <Input type="number" step="0.01" value={interestForm.amount} onChange={e => setInterestForm(p => ({ ...p, amount: e.target.value }))} placeholder={detail ? String(detail.max_payout) : ""} />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowInterest(false)}>Отмена</Button>
@@ -565,6 +596,70 @@ const Savings = () => {
               <Button onClick={handleEarlyClose} disabled={saving} variant="destructive" className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="XCircle" size={16} />}
                 Закрыть досрочно
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Partial withdrawal dialog */}
+      <Dialog open={showWithdrawal} onOpenChange={setShowWithdrawal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Частичное изъятие</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50 space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Текущий баланс:</span>
+                  <span className="font-semibold">{fmt(detail.current_balance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Неснижаемый остаток ({detail.min_balance_pct}%):</span>
+                  <span className="font-medium text-amber-600">{fmt(detail.amount * detail.min_balance_pct / 100)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t pt-1">
+                  <span className="text-muted-foreground font-medium">Макс. к снятию:</span>
+                  <span className="font-bold">{fmt(Math.max(0, detail.current_balance - detail.amount * detail.min_balance_pct / 100))}</span>
+                </div>
+              </Card>
+            )}
+            <div className="space-y-1.5"><Label className="text-xs">Дата операции</Label><Input type="date" value={withdrawalForm.date} onChange={e => setWithdrawalForm(p => ({ ...p, date: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Сумма изъятия, \u20BD</Label><Input type="number" step="0.01" value={withdrawalForm.amount} onChange={e => setWithdrawalForm(p => ({ ...p, amount: e.target.value }))} /></div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowWithdrawal(false)}>Отмена</Button>
+              <Button onClick={handlePartialWithdrawal} disabled={saving || !withdrawalForm.amount} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="ArrowDownCircle" size={16} />}
+                Провести изъятие
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modify term dialog */}
+      <Dialog open={showModifyTerm} onOpenChange={setShowModifyTerm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Изменение срока вклада</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Текущий срок:</span>
+                  <span className="font-semibold">{detail.term_months} мес.</span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span className="text-muted-foreground">Окончание:</span>
+                  <span className="font-medium">{fmtDate(detail.end_date)}</span>
+                </div>
+              </Card>
+            )}
+            <div className="space-y-1.5"><Label className="text-xs">Новый срок, месяцев</Label><Input type="number" min="1" value={modifyTermForm.new_term} onChange={e => setModifyTermForm(p => ({ ...p, new_term: e.target.value }))} /></div>
+            <p className="text-xs text-muted-foreground">Плановый график будет пересчитан под новый срок</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowModifyTerm(false)}>Отмена</Button>
+              <Button onClick={handleModifyTerm} disabled={saving || !modifyTermForm.new_term} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                Сохранить
               </Button>
             </div>
           </div>

@@ -495,6 +495,39 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
+def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_type):
+    cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND status='paid'" % sid)
+    paid_ids = [r[0] for r in cur.fetchall()]
+    cur.execute("UPDATE savings_schedule SET status='obsolete' WHERE saving_id=%s AND status IN ('pending','accrued')" % sid)
+    schedule = calc_savings_schedule(amount, rate, term, start_date, payout_type)
+    for item in schedule:
+        cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='paid'" % (sid, item['period_no']))
+        if cur.fetchone():
+            continue
+        cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='obsolete'" % (sid, item['period_no']))
+        old = cur.fetchone()
+        if old:
+            cur.execute("UPDATE savings_schedule SET period_start='%s', period_end='%s', interest_amount=%s, cumulative_interest=%s, balance_after=%s, status='pending' WHERE id=%s" % (
+                item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after'], old[0]))
+        else:
+            cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (
+                sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
+    cur.execute("UPDATE savings_schedule SET status='pending' WHERE saving_id=%s AND status='obsolete'" % sid)
+    today = date.today().isoformat()
+    cur.execute("UPDATE savings_schedule SET status='accrued' WHERE saving_id=%s AND status='pending' AND period_end <= '%s'" % (sid, today))
+    return schedule
+
+def get_accrued_interest_end_of_prev_month(cur, sid):
+    today = date.today()
+    first_of_month = today.replace(day=1)
+    last_of_prev = first_of_month - timedelta(days=1)
+    cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s AND accrual_date <= '%s'" % (sid, last_of_prev.isoformat()))
+    total_accrued = Decimal(str(cur.fetchone()[0]))
+    cur.execute("SELECT paid_interest FROM savings WHERE id=%s" % sid)
+    paid = Decimal(str(cur.fetchone()[0]))
+    available = total_accrued - paid
+    return max(available, Decimal('0'))
+
 def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
@@ -510,6 +543,9 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 conn.commit()
             s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % params['id'])
             s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % params['id'])
+            cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % params['id'])
+            s['total_daily_accrued'] = float(cur.fetchone()[0])
+            s['max_payout'] = float(get_accrued_interest_end_of_prev_month(cur, int(params['id'])))
             return s
         elif action == 'schedule':
             a, r, t = float(params['amount']), float(params['rate']), int(params['term'])
@@ -520,6 +556,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             return query_rows(cur, """
                 SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type,
                        s.start_date, s.end_date, s.accrued_interest, s.paid_interest, s.current_balance, s.status,
+                       s.min_balance_pct,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
                             ELSE m.company_name END as member_name, m.id as member_id
                 FROM savings s JOIN members m ON m.id=s.member_id ORDER BY s.created_at DESC
@@ -533,12 +570,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             pt = body.get('payout_type', 'monthly')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
             ed = last_day_of_month(add_months(sd, t))
+            mbp = float(body.get('min_balance_pct', 0))
             schedule = calc_savings_schedule(a, r, t, sd, pt)
-            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active') RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a))
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp))
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
-            audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес.' % (a, r, t), ip)
+            audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес., несниж.остаток: %s%%' % (a, r, t, mbp), ip)
             conn.commit()
             return {'id': sid, 'schedule': schedule}
 
@@ -552,6 +590,9 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',%s,'%s')" % (sid, td, a, tt, ic, esc(d)))
             if tt == 'deposit':
                 cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (a, a, sid))
+                cur.execute("SELECT amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s" % sid)
+                sv = cur.fetchone()
+                recalc_savings_schedule(cur, sid, float(sv[0]), float(sv[1]), int(sv[2]), date.fromisoformat(str(sv[3])), sv[4])
             elif tt == 'withdrawal':
                 cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (a, sid))
             elif tt == 'interest_payout':
@@ -563,39 +604,88 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'interest_payout':
             sid = int(body['saving_id'])
-            period_id = body.get('period_id')
             cur.execute("SELECT payout_type, accrued_interest, paid_interest, current_balance, rate, amount FROM savings WHERE id=%s" % sid)
             sv = cur.fetchone()
             if not sv:
                 return {'error': 'Вклад не найден'}
-            payout_type = sv[0]
-            s_rate = Decimal(str(sv[4]))
-            s_amount = Decimal(str(sv[5]))
             td = body.get('transaction_date', date.today().isoformat())
 
-            if payout_type == 'end_of_term':
-                return {'error': 'По данному вкладу проценты выплачиваются в конце срока'}
+            max_payout = get_accrued_interest_end_of_prev_month(cur, sid)
+            if max_payout <= 0:
+                return {'error': 'Нет начисленных процентов к выплате (по данным на конец предыдущего месяца)'}
 
-            if period_id:
-                cur.execute("SELECT id, interest_amount, status, period_no FROM savings_schedule WHERE id=%s AND saving_id=%s" % (int(period_id), sid))
-            else:
-                cur.execute("SELECT id, interest_amount, status, period_no FROM savings_schedule WHERE saving_id=%s AND status IN ('pending','accrued') ORDER BY period_no LIMIT 1" % sid)
-            period = cur.fetchone()
-            if not period:
-                return {'error': 'Нет неоплаченных периодов'}
+            interest = Decimal(str(body['amount'])) if body.get('amount') else max_payout
+            if interest > max_payout:
+                interest = max_payout
 
-            p_id, p_interest, p_status, p_no = period[0], Decimal(str(period[1])), period[2], period[3]
-            if p_status == 'paid':
-                return {'error': 'Период #%s уже оплачен' % p_no}
-
-            interest = Decimal(str(body['amount'])) if body.get('amount') else p_interest
-
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_payout','Выплата %% за период #%s')" % (sid, td, float(interest), p_no))
-            cur.execute("UPDATE savings_schedule SET status='paid', paid_date='%s', paid_amount=%s WHERE id=%s" % (td, float(interest), p_id))
-            cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(interest), float(interest), sid))
-            audit_log(cur, staff, 'interest_payout', 'saving', sid, '', 'Выплата %% за период #%s: %s' % (p_no, float(interest)), ip)
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_payout','Выплата процентов')" % (sid, td, float(interest)))
+            cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, updated_at=NOW() WHERE id=%s" % (float(interest), sid))
+            audit_log(cur, staff, 'interest_payout', 'saving', sid, '', 'Выплата %%: %s (макс: %s)' % (float(interest), float(max_payout)), ip)
             conn.commit()
-            return {'success': True, 'amount': float(interest), 'period_no': p_no}
+            return {'success': True, 'amount': float(interest), 'max_payout': float(max_payout)}
+
+        elif action == 'daily_accrue':
+            today = date.today()
+            accrual_date = body.get('date', today.isoformat())
+            cur.execute("SELECT id, current_balance, rate FROM savings WHERE status='active'")
+            savings_rows = cur.fetchall()
+            count = 0
+            total = Decimal('0')
+            for row in savings_rows:
+                s_id, s_bal, s_rate = row[0], Decimal(str(row[1])), Decimal(str(row[2]))
+                if s_bal <= 0:
+                    continue
+                daily_amount = (s_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if daily_amount <= 0:
+                    continue
+                cur.execute("SELECT id FROM savings_daily_accruals WHERE saving_id=%s AND accrual_date='%s'" % (s_id, accrual_date))
+                if cur.fetchone():
+                    continue
+                cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (s_id, accrual_date, float(s_bal), float(s_rate), float(daily_amount)))
+                cur.execute("UPDATE savings SET accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(daily_amount), s_id))
+                count += 1
+                total += daily_amount
+            if count > 0:
+                conn.commit()
+            return {'success': True, 'accrued_count': count, 'total_amount': float(total), 'date': accrual_date}
+
+        elif action == 'partial_withdrawal':
+            sid = int(body['saving_id'])
+            a = Decimal(str(body['amount']))
+            td = body.get('transaction_date', date.today().isoformat())
+            cur.execute("SELECT current_balance, amount, min_balance_pct FROM savings WHERE id=%s AND status='active'" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден или не активен'}
+            bal = Decimal(str(sv[0]))
+            orig_amount = Decimal(str(sv[1]))
+            mbp = Decimal(str(sv[2]))
+            if mbp <= 0:
+                return {'error': 'По данному договору частичное изъятие не предусмотрено'}
+            min_bal = (orig_amount * mbp / Decimal('100')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            new_bal = bal - a
+            if new_bal < min_bal:
+                return {'error': 'Нельзя снять больше. Неснижаемый остаток: %s руб. (текущий баланс: %s руб.)' % (float(min_bal), float(bal))}
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'withdrawal','Частичное изъятие')" % (sid, td, float(a)))
+            cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (float(a), sid))
+            audit_log(cur, staff, 'partial_withdrawal', 'saving', sid, '', 'Сумма: %s, остаток: %s' % (float(a), float(new_bal)), ip)
+            conn.commit()
+            return {'success': True, 'new_balance': float(new_bal), 'min_balance': float(min_bal)}
+
+        elif action == 'modify_term':
+            sid = int(body['saving_id'])
+            new_term = int(body['new_term'])
+            cur.execute("SELECT amount, rate, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден или не активен'}
+            s_amount, s_rate, s_start, s_pt = float(sv[0]), float(sv[1]), date.fromisoformat(str(sv[2])), sv[3]
+            new_end = last_day_of_month(add_months(s_start, new_term))
+            schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
+            cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
+            audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес.' % new_term, ip)
+            conn.commit()
+            return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule}
 
         elif action == 'auto_accrue':
             sid = int(body['saving_id'])
@@ -1797,6 +1887,8 @@ def handle_cabinet(method, params, body, headers, cur):
         if not saving:
             return {'error': 'Договор не найден'}
         saving['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % saving_id)
+        cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % saving_id)
+        saving['total_daily_accrued'] = float(cur.fetchone()[0])
         return saving
 
     return {'error': 'Неизвестное действие'}
@@ -1877,6 +1969,12 @@ def handler(event, context):
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
             result = handle_cabinet(method, params, body, ev_headers, cur)
+        elif entity == 'cron':
+            cron_action = body.get('action') or params.get('action', '')
+            if cron_action == 'daily_accrue':
+                result = handle_savings('POST', params, {'action': 'daily_accrue', 'date': body.get('date', date.today().isoformat())}, cur, conn, None, src_ip)
+            else:
+                result = {'error': 'Неизвестное cron действие'}
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 
