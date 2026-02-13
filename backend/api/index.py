@@ -449,6 +449,32 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True}
 
+        elif action == 'delete_contract':
+            lid = int(body['loan_id'])
+            cur.execute("SELECT contract_no FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            cur.execute("DELETE FROM loan_payments WHERE loan_id=%s" % lid)
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
+            cur.execute("DELETE FROM loans WHERE id=%s" % lid)
+            audit_log(cur, staff, 'delete_contract', 'loan', lid, lr[0], '', ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_all_payments':
+            lid = int(body['loan_id'])
+            cur.execute("SELECT amount FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            cur.execute("DELETE FROM loan_payments WHERE loan_id=%s" % lid)
+            cur.execute("UPDATE loan_schedule SET status='pending', paid_amount=0, paid_date=NULL WHERE loan_id=%s" % lid)
+            cur.execute("UPDATE loans SET balance=%s, status='active', updated_at=NOW() WHERE id=%s" % (float(lr[0]), lid))
+            audit_log(cur, staff, 'delete_all_payments', 'loan', lid, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
         elif action == 'modify':
             lid = int(body['loan_id'])
             cur.execute("SELECT balance, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
@@ -633,6 +659,33 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True}
 
+        elif action == 'delete_contract':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT contract_no FROM savings WHERE id=%s" % sid)
+            sr = cur.fetchone()
+            if not sr:
+                return {'error': 'Договор не найден'}
+            cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings_schedule WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings WHERE id=%s" % sid)
+            audit_log(cur, staff, 'delete_contract', 'saving', sid, sr[0], '', ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_all_transactions':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT amount FROM savings WHERE id=%s" % sid)
+            sr = cur.fetchone()
+            if not sr:
+                return {'error': 'Договор не найден'}
+            cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s" % sid)
+            cur.execute("UPDATE savings_schedule SET status='pending', paid_date=NULL, paid_amount=0 WHERE saving_id=%s" % sid)
+            orig = float(sr[0])
+            cur.execute("UPDATE savings SET current_balance=%s, accrued_interest=0, paid_interest=0, status='active', updated_at=NOW() WHERE id=%s" % (orig, sid))
+            audit_log(cur, staff, 'delete_all_transactions', 'saving', sid, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
         elif action == 'early_close':
             sid = int(body['saving_id'])
             cur.execute("SELECT amount, accrued_interest, paid_interest, current_balance FROM savings WHERE id=%s" % sid)
@@ -739,6 +792,29 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
             else:
                 cur.execute("UPDATE share_accounts SET balance=balance+%s, total_out=total_out-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), aid))
             audit_log(cur, staff, 'delete_transaction', 'share', aid, '', 'Удалена: %s %s' % (old_tt, float(old_amount)), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_account':
+            aid = int(body['account_id'])
+            cur.execute("SELECT account_no FROM share_accounts WHERE id=%s" % aid)
+            ar = cur.fetchone()
+            if not ar:
+                return {'error': 'Счёт не найден'}
+            cur.execute("DELETE FROM share_transactions WHERE account_id=%s" % aid)
+            cur.execute("DELETE FROM share_accounts WHERE id=%s" % aid)
+            audit_log(cur, staff, 'delete_account', 'share', aid, ar[0], '', ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_all_transactions':
+            aid = int(body['account_id'])
+            cur.execute("SELECT id FROM share_accounts WHERE id=%s" % aid)
+            if not cur.fetchone():
+                return {'error': 'Счёт не найден'}
+            cur.execute("DELETE FROM share_transactions WHERE account_id=%s" % aid)
+            cur.execute("UPDATE share_accounts SET balance=0, total_in=0, total_out=0, updated_at=NOW() WHERE id=%s" % aid)
+            audit_log(cur, staff, 'delete_all_transactions', 'share', aid, '', '', ip)
             conn.commit()
             return {'success': True}
 
@@ -1490,6 +1566,26 @@ def handle_users(method, params, body, staff, cur, conn):
             audit_log(cur, staff, 'block', 'user', uid, '', '', '')
             conn.commit()
             return {'success': True}
+        elif action == 'bulk_create_clients':
+            default_password = body.get('password', 'kpk12345')
+            if len(default_password) < 6:
+                return {'error': 'Пароль не менее 6 символов'}
+            pw_hash = hash_password(default_password)
+            cur.execute("SELECT m.id, m.member_no, m.phone, CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name) ELSE m.company_name END as name FROM members m WHERE m.status='active' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.member_id=m.id AND u.role='client')")
+            rows = cur.fetchall()
+            created = 0
+            for r in rows:
+                mid, mno, mphone, mname = r[0], r[1], r[2] or '', r[3] or 'Клиент'
+                login = mno.lower().replace('-', '').replace(' ', '')
+                cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
+                if cur.fetchone():
+                    login = login + str(mid)
+                cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','','%s','client','%s',%s)" % (esc(login), esc(mname), esc(mphone), pw_hash, mid))
+                created += 1
+            if created > 0:
+                audit_log(cur, staff, 'bulk_create_clients', 'user', None, '', 'Создано: %s' % created, '')
+                conn.commit()
+            return {'success': True, 'created': created, 'password': default_password}
     return {'error': 'Неизвестное действие'}
 
 def handle_auth(method, body, cur, conn):
@@ -1756,7 +1852,7 @@ def handler(event, context):
                 if entity in ('users', 'audit'):
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Недостаточно прав'})}
                 action = params.get('action') or body.get('action', '')
-                if action == 'delete':
+                if action and 'delete' in action:
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
 
         if entity == 'dashboard':

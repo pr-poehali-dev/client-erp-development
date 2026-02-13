@@ -53,6 +53,10 @@ export const api = {
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
     modify: (data: { loan_id: number; new_rate?: number; new_term?: number }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "modify", ...data }),
+    deleteContract: (loanId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_contract", loan_id: loanId }),
+    deleteAllPayments: (loanId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_all_payments", loan_id: loanId }),
     updatePayment: (data: { payment_id: number; payment_date?: string; amount?: number; principal_part?: number; interest_part?: number; penalty_part?: number }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
     deletePayment: (paymentId: number) =>
@@ -70,6 +74,10 @@ export const api = {
     transaction: (data: { saving_id: number; amount: number; transaction_type: string; transaction_date?: string; is_cash?: boolean; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "transaction", ...data }),
     earlyClose: (savingId: number) => request<{ final_amount: number; early_interest: number }>("POST", undefined, { entity: "savings", action: "early_close", saving_id: savingId }),
+    deleteContract: (savingId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_contract", saving_id: savingId }),
+    deleteAllTransactions: (savingId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_all_transactions", saving_id: savingId }),
     interestPayout: (data: { saving_id: number; amount?: number; transaction_date?: string; period_id?: number }) =>
       request<{ success: boolean; amount: number; period_no?: number }>("POST", undefined, { entity: "savings", action: "interest_payout", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
@@ -88,6 +96,10 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "delete_transaction", transaction_id: transactionId }),
+    deleteAccount: (accountId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "delete_account", account_id: accountId }),
+    deleteAllTransactions: (accountId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "delete_all_transactions", account_id: accountId }),
   },
 
   export: {
@@ -139,6 +151,8 @@ export const api = {
     update: (data: { id: number; name?: string; role?: string; login?: string; email?: string; phone?: string; password?: string; status?: string; member_id?: number | null }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "users", action: "update", ...data }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "users", action: "delete", id }),
+    bulkCreateClients: (password?: string) =>
+      request<{ success: boolean; created: number; password: string }>("POST", undefined, { entity: "users", action: "bulk_create_clients", password }),
   },
 
   audit: {

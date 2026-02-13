@@ -160,6 +160,25 @@ const Admin = () => {
     }
   };
 
+  const handleBulkCreateClients = async () => {
+    const membersWithoutAccount = members.filter(m => m.status === "active" && !clientUsers.some(u => u.member_id === m.id));
+    if (membersWithoutAccount.length === 0) {
+      toast({ title: "Все пайщики уже имеют учётные записи" });
+      return;
+    }
+    if (!confirm(`Будет создано ${membersWithoutAccount.length} учётных записей клиентов с паролем по умолчанию "kpk12345". Продолжить?`)) return;
+    setSaving(true);
+    try {
+      const res = await api.users.bulkCreateClients();
+      toast({ title: `Создано ${res.created} клиентов`, description: `Пароль по умолчанию: ${res.password}` });
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePwChange = async () => {
     if (!pwForm.new_password) return;
     setSaving(true);
@@ -242,9 +261,14 @@ const Admin = () => {
               <div className="text-xs text-muted-foreground mb-1">Клиентов в личном кабинете</div>
               <div className="text-xl font-bold">{clientUsers.length}</div>
             </Card>
-            <Button onClick={() => { setClientForm({ login: "", name: "", password: "", phone: "", member_id: "" }); setShowClientForm(true); }} className="gap-2">
-              <Icon name="UserPlus" size={16} />Добавить клиента
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handleBulkCreateClients} disabled={saving} className="gap-2">
+                <Icon name="UsersRound" size={16} />Создать для всех пайщиков
+              </Button>
+              <Button onClick={() => { setClientForm({ login: "", name: "", password: "", phone: "", member_id: "" }); setShowClientForm(true); }} className="gap-2">
+                <Icon name="UserPlus" size={16} />Добавить клиента
+              </Button>
+            </div>
           </div>
           {loading ? (
             <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>

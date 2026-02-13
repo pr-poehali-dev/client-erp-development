@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import api, { Saving, SavingDetail, SavingTransaction, Member, SavingsScheduleItem } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
@@ -45,6 +46,7 @@ const Savings = () => {
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<SavingsScheduleItem[] | null>(null);
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const [showDetail, setShowDetail] = useState(false);
   const [detail, setDetail] = useState<SavingDetail | null>(null);
@@ -214,6 +216,38 @@ const Savings = () => {
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleDeleteContract = async () => {
+    if (!detail || !confirm(`УДАЛИТЬ договор ${detail.contract_no} со всеми операциями? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.savings.deleteContract(detail.id);
+      toast({ title: "Договор удалён" });
+      setShowDetail(false);
+      setDetail(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAllTransactions = async () => {
+    if (!detail || !confirm(`Удалить ВСЕ операции по договору ${detail.contract_no} и сбросить начисления? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.savings.deleteAllTransactions(detail.id);
+      toast({ title: "Все операции удалены, начисления сброшены" });
+      const d = await api.savings.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -433,6 +467,18 @@ const Savings = () => {
                         <div className="flex items-center gap-2"><Icon name="FileText" size={16} /><span className="font-medium text-sm">Выписка PDF</span></div>
                       </Button>
                     </div>
+                    {isAdmin && detail.transactions.length > 0 && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={handleDeleteAllTransactions} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Eraser" size={16} /><span className="font-medium text-sm">Удалить все операции</span></div>
+                        <span className="text-xs text-muted-foreground">Сбросить историю операций и начисления</span>
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-destructive/50 text-destructive hover:bg-destructive/5" onClick={handleDeleteContract} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Trash2" size={16} /><span className="font-medium text-sm">Удалить договор</span></div>
+                        <span className="text-xs text-muted-foreground">Полностью удалить договор со всеми данными</span>
+                      </Button>
+                    )}
                   </div>
                 </TabsContent>
               </Tabs>

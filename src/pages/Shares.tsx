@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import api, { ShareAccount, ShareAccountDetail, ShareTransaction, Member } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
@@ -42,6 +43,7 @@ const Shares = () => {
   const [showOp, setShowOp] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const [showDetail, setShowDetail] = useState(false);
   const [detail, setDetail] = useState<ShareAccountDetail | null>(null);
@@ -144,6 +146,38 @@ const Shares = () => {
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!detail || !confirm(`УДАЛИТЬ паевой счёт ${detail.account_no} со всеми операциями? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.shares.deleteAccount(detail.id);
+      toast({ title: "Счёт удалён" });
+      setShowDetail(false);
+      setDetail(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAllTransactions = async () => {
+    if (!detail || !confirm(`Удалить ВСЕ операции по счёту ${detail.account_no} и обнулить баланс? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.shares.deleteAllTransactions(detail.id);
+      toast({ title: "Все операции удалены, баланс обнулён" });
+      const d = await api.shares.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -300,6 +334,18 @@ const Shares = () => {
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" onClick={() => { api.export.download("share", detail.id, "pdf"); toast({ title: "Формируется PDF-выписка..." }); }}>
                       <div className="flex items-center gap-2"><Icon name="FileText" size={16} /><span className="font-medium text-sm">Выписка PDF</span></div>
                     </Button>
+                    {isAdmin && detail.transactions.length > 0 && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={handleDeleteAllTransactions} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Eraser" size={16} /><span className="font-medium text-sm">Удалить все операции</span></div>
+                        <span className="text-xs text-muted-foreground">Обнулить баланс и удалить историю</span>
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-destructive/50 text-destructive hover:bg-destructive/5" onClick={handleDeleteAccount} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Trash2" size={16} /><span className="font-medium text-sm">Удалить счёт</span></div>
+                        <span className="text-xs text-muted-foreground">Полностью удалить счёт со всеми данными</span>
+                      </Button>
+                    )}
                   </div>
                 </TabsContent>
               </Tabs>

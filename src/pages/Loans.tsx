@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import api, { Loan, LoanDetail, LoanPayment, Member, ScheduleItem } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -55,6 +56,7 @@ const Loans = () => {
   const [showModify, setShowModify] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10) });
   const [preview, setPreview] = useState<ScheduleItem[] | null>(null);
@@ -251,6 +253,38 @@ const Loans = () => {
       load();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleDeleteContract = async () => {
+    if (!detail || !confirm(`УДАЛИТЬ договор ${detail.contract_no} со всеми платежами и графиком? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.loans.deleteContract(detail.id);
+      toast({ title: "Договор удалён" });
+      setShowDetail(false);
+      setDetail(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAllPayments = async () => {
+    if (!detail || !confirm(`Удалить ВСЕ платежи по договору ${detail.contract_no} и сбросить остаток? Это действие необратимо!`)) return;
+    setSaving(true);
+    try {
+      await api.loans.deleteAllPayments(detail.id);
+      toast({ title: "Все платежи удалены, остаток восстановлен" });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -452,6 +486,18 @@ const Loans = () => {
                         <span className="text-xs text-muted-foreground">Скачать .pdf для печати</span>
                       </Button>
                     </div>
+                    {isAdmin && detail.payments.length > 0 && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={handleDeleteAllPayments} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Eraser" size={16} /><span className="font-medium text-sm">Удалить все платежи</span></div>
+                        <span className="text-xs text-muted-foreground">Сбросить историю платежей и восстановить остаток</span>
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-destructive/50 text-destructive hover:bg-destructive/5" onClick={handleDeleteContract} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Trash2" size={16} /><span className="font-medium text-sm">Удалить договор</span></div>
+                        <span className="text-xs text-muted-foreground">Полностью удалить договор со всеми данными</span>
+                      </Button>
+                    )}
                   </div>
                 </TabsContent>
               </Tabs>
