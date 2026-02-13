@@ -47,7 +47,7 @@ export const api = {
         entity: "loans", action: "schedule", amount, rate, term, schedule_type: scheduleType, start_date: startDate,
       }),
     create: (data: CreateLoanData) => request<{ id: number; schedule: ScheduleItem[]; monthly_payment: number }>("POST", undefined, { entity: "loans", action: "create", ...data }),
-    payment: (data: { loan_id: number; payment_date: string; amount: number }) =>
+    payment: (data: { loan_id: number; payment_date: string; amount: number; overpay_strategy?: string }) =>
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
@@ -277,14 +277,25 @@ export interface CreateLoanData {
   start_date: string;
 }
 
+export interface OverpayOption {
+  new_monthly: number;
+  new_term: number;
+  description: string;
+}
+
 export interface PaymentResult {
-  success: boolean;
-  new_balance: number;
-  principal_part: number;
-  interest_part: number;
-  penalty_part: number;
+  success?: boolean;
+  new_balance?: number;
+  principal_part?: number;
+  interest_part?: number;
+  penalty_part?: number;
   schedule_recalculated?: boolean;
   new_monthly?: number;
+  needs_choice?: boolean;
+  overpay_amount?: number;
+  current_payment?: number;
+  total_amount?: number;
+  options?: Record<string, OverpayOption>;
 }
 
 export interface Saving {

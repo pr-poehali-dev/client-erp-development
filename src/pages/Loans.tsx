@@ -70,6 +70,9 @@ const Loans = () => {
   const [modifyMonthly, setModifyMonthly] = useState(0);
   const [showEditPayment, setShowEditPayment] = useState(false);
   const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "" });
+  const [showOverpayChoice, setShowOverpayChoice] = useState(false);
+  const [overpayOptions, setOverpayOptions] = useState<Record<string, { new_monthly: number; new_term: number; description: string }>>({});
+  const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
 
   const load = () => {
     setLoading(true);
@@ -111,13 +114,27 @@ const Loans = () => {
     setShowDetail(true);
   };
 
-  const handlePayment = async () => {
+  const handlePayment = async (strategy?: string) => {
     if (!detail || !payForm.amount) return;
     setSaving(true);
     try {
-      const res = await api.loans.payment({ loan_id: detail.id, payment_date: payForm.date, amount: Number(payForm.amount) });
-      const parts = [`Осн. долг: ${fmt(res.principal_part)}`, `Проценты: ${fmt(res.interest_part)}`];
-      if (res.penalty_part > 0) parts.push(`Штрафы: ${fmt(res.penalty_part)}`);
+      const res = await api.loans.payment({
+        loan_id: detail.id, payment_date: payForm.date,
+        amount: Number(payForm.amount), overpay_strategy: strategy,
+      });
+      if (res.needs_choice && res.options) {
+        setOverpayOptions(res.options);
+        setOverpayInfo({
+          overpay_amount: res.overpay_amount || 0,
+          current_payment: res.current_payment || 0,
+          total_amount: res.total_amount || 0,
+        });
+        setShowPayment(false);
+        setShowOverpayChoice(true);
+        return;
+      }
+      const parts = [`Осн. долг: ${fmt(res.principal_part || 0)}`, `Проценты: ${fmt(res.interest_part || 0)}`];
+      if ((res.penalty_part || 0) > 0) parts.push(`Штрафы: ${fmt(res.penalty_part || 0)}`);
       let title = "Платёж внесён";
       if (res.new_balance === 0) {
         title = "Займ полностью погашен";
@@ -127,6 +144,7 @@ const Loans = () => {
       }
       toast({ title, description: parts.join(" · ") });
       setShowPayment(false);
+      setShowOverpayChoice(false);
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();
@@ -526,11 +544,45 @@ const Loans = () => {
             <div className="space-y-1.5"><Label className="text-xs">Сумма, ₽</Label><Input type="number" value={payForm.amount} onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))} placeholder={detail ? String(Math.round(detail.monthly_payment)) : ""} /></div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowPayment(false)}>Отмена</Button>
-              <Button onClick={handlePayment} disabled={saving || !payForm.amount} className="gap-2">
+              <Button onClick={() => handlePayment()} disabled={saving || !payForm.amount} className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Check" size={16} />}
                 Провести
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showOverpayChoice} onOpenChange={v => { if (!v) setShowOverpayChoice(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Icon name="AlertTriangle" size={20} className="text-amber-500" />Переплата по платежу</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm space-y-1">
+              <p>Сумма платежа <span className="font-semibold">{fmt(overpayInfo.total_amount)}</span> превышает текущий платёж по графику <span className="font-semibold">{fmt(overpayInfo.current_payment)}</span>.</p>
+              <p>Переплата: <span className="font-semibold text-amber-600">{fmt(overpayInfo.overpay_amount)}</span></p>
+            </div>
+            <p className="text-sm text-muted-foreground">Выберите, как распорядиться переплатой:</p>
+            <div className="space-y-2">
+              {overpayOptions.reduce_payment && (
+                <Button variant="outline" className="w-full justify-start h-auto py-3" onClick={() => handlePayment("reduce_payment")} disabled={saving}>
+                  <div className="text-left">
+                    <div className="font-medium flex items-center gap-2"><Icon name="ArrowDown" size={14} />Уменьшить платёж</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">Новый платёж: {fmt(overpayOptions.reduce_payment.new_monthly)}, срок: {overpayOptions.reduce_payment.new_term} мес.</div>
+                  </div>
+                </Button>
+              )}
+              {overpayOptions.reduce_term && (
+                <Button variant="outline" className="w-full justify-start h-auto py-3" onClick={() => handlePayment("reduce_term")} disabled={saving}>
+                  <div className="text-left">
+                    <div className="font-medium flex items-center gap-2"><Icon name="Clock" size={14} />Сократить срок</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">Новый платёж: {fmt(overpayOptions.reduce_term.new_monthly)}, срок: {overpayOptions.reduce_term.new_term} мес.</div>
+                  </div>
+                </Button>
+              )}
+            </div>
+            <Button variant="ghost" className="w-full" onClick={() => { setShowOverpayChoice(false); setShowPayment(true); }}>
+              <Icon name="ArrowLeft" size={14} className="mr-2" />Назад
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
