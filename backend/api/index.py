@@ -1147,8 +1147,8 @@ def build_pdf_header(font_r, font_b):
     inner_data = [
         [Paragraph('КПК «ЭКСПЕРТ ФИНАНС»', name_s)],
         [Paragraph('Работаем с финансами, думаем о людях', slogan_s)],
-        [Paragraph('☎  8 (800) 700-89-09', phone_s)],
-        [Paragraph('⌂ nfofinans.ru    ✉ info@sll-expert.ru    ✈ @nfofinans_161    Ⓜ +79613032756', contact_s)],
+        [Paragraph('Тел: 8 (800) 700-89-09', phone_s)],
+        [Paragraph('Сайт: nfofinans.ru    Email: info@sll-expert.ru    Telegram: @nfofinans_161    WhatsApp: +79613032756', contact_s)],
     ]
     inner = Table(inner_data, colWidths=[None])
     inner.setStyle(TableStyle([
