@@ -1116,6 +1116,62 @@ def register_cyrillic_font():
     _font_registered = True
     return 'DejaVuSans', 'DejaVuSans-Bold'
 
+_logo_path_cache = None
+
+def get_logo_path():
+    global _logo_path_cache
+    if _logo_path_cache and os.path.exists(_logo_path_cache):
+        return _logo_path_cache
+    import urllib.request
+    p = '/tmp/logo_kpk.jpg'
+    if not os.path.exists(p):
+        urllib.request.urlretrieve('https://cdn.poehali.dev/projects/e404b5e6-12a9-4922-a20d-e3c26e46e7a6/bucket/39b830d8-2ba0-408a-8ced-fe6a9eaf99e4.jpg', p)
+    _logo_path_cache = p
+    return p
+
+def build_pdf_header(font_r, font_b):
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT
+
+    logo_path = get_logo_path()
+    logo = Image(logo_path, width=24*mm, height=24*mm)
+
+    name_s = ParagraphStyle('HN', fontName=font_b, fontSize=12, leading=14, textColor=colors.HexColor('#1a3c5e'))
+    slogan_s = ParagraphStyle('HS', fontName=font_r, fontSize=7, leading=9, textColor=colors.HexColor('#888888'), spaceAfter=1)
+    phone_s = ParagraphStyle('HP', fontName=font_b, fontSize=9, leading=11, textColor=colors.HexColor('#333333'), spaceAfter=1)
+    contact_s = ParagraphStyle('HC', fontName=font_r, fontSize=6.5, leading=9, textColor=colors.HexColor('#555555'))
+
+    inner_data = [
+        [Paragraph('КПК «ЭКСПЕРТ ФИНАНС»', name_s)],
+        [Paragraph('Работаем с финансами, думаем о людях', slogan_s)],
+        [Paragraph('☎  8 (800) 700-89-09', phone_s)],
+        [Paragraph('⌂ nfofinans.ru    ✉ info@sll-expert.ru    ✈ @nfofinans_161    Ⓜ +79613032756', contact_s)],
+    ]
+    inner = Table(inner_data, colWidths=[None])
+    inner.setStyle(TableStyle([
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+    ]))
+
+    header = Table([[logo, inner]], colWidths=[28*mm, None])
+    header.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (0, 0), 'TOP'), ('VALIGN', (1, 0), (1, 0), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    line_data = [['']]
+    line = Table(line_data, colWidths=[186*mm])
+    line.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, -1), 0.8, colors.HexColor('#2e5d8a')),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    return [header, Spacer(1, 3), line, Spacer(1, 8)]
+
 def generate_loan_xlsx(loan, schedule, payments, member_name):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -1261,6 +1317,8 @@ def generate_loan_pdf(loan, schedule, payments, member_name):
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     story = []
+
+    story.extend(build_pdf_header(font_r, font_b))
 
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
@@ -1452,6 +1510,8 @@ def generate_savings_pdf(saving, schedule, transactions, member_name):
     styles = getSampleStyleSheet()
     story = []
 
+    story.extend(build_pdf_header(font_r, font_b))
+
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
     footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
@@ -1590,6 +1650,8 @@ def generate_shares_pdf(account, transactions, member_name):
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     story = []
+
+    story.extend(build_pdf_header(font_r, font_b))
 
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
