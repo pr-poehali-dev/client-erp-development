@@ -64,7 +64,7 @@ const Admin = () => {
   const [auditPage, setAuditPage] = useState(0);
   const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
   const [auditLoading, setAuditLoading] = useState(false);
-  const [orgSettings, setOrgSettings] = useState<OrgSettings>({ name: "", inn: "", ogrn: "", director_fio: "", bank_name: "", bik: "", rs: "" });
+  const [orgSettings, setOrgSettings] = useState<OrgSettings>({ name: "", inn: "", ogrn: "", director_fio: "", bank_name: "", bik: "", rs: "", phone: "", website: "", email: "", telegram: "", whatsapp: "" });
   const [orgLoading, setOrgLoading] = useState(false);
   const [orgSaving, setOrgSaving] = useState(false);
 
@@ -471,6 +471,38 @@ const Admin = () => {
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">ФИО руководителя</Label>
                   <Input value={orgSettings.director_fio} onChange={(e) => setOrgSettings({ ...orgSettings, director_fio: e.target.value })} placeholder="Иванов Иван Иванович" />
+                </div>
+                <div className="border-t pt-4 mt-4">
+                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <Icon name="Phone" size={16} className="text-muted-foreground" />
+                    Контакты
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Телефон</Label>
+                        <Input value={orgSettings.phone} onChange={(e) => setOrgSettings({ ...orgSettings, phone: e.target.value })} placeholder="8 (800) 700-89-09" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Сайт</Label>
+                        <Input value={orgSettings.website} onChange={(e) => setOrgSettings({ ...orgSettings, website: e.target.value })} placeholder="nfofinans.ru" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Email</Label>
+                      <Input value={orgSettings.email} onChange={(e) => setOrgSettings({ ...orgSettings, email: e.target.value })} placeholder="info@sll-expert.ru" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Telegram</Label>
+                        <Input value={orgSettings.telegram} onChange={(e) => setOrgSettings({ ...orgSettings, telegram: e.target.value })} placeholder="@nfofinans_161" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">WhatsApp</Label>
+                        <Input value={orgSettings.whatsapp} onChange={(e) => setOrgSettings({ ...orgSettings, whatsapp: e.target.value })} placeholder="+79613032756" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="border-t pt-4 mt-4">
                   <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">

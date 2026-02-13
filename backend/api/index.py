@@ -1129,12 +1129,34 @@ def get_logo_path():
     _logo_path_cache = p
     return p
 
-def build_pdf_header(font_r, font_b):
+def load_org_settings(cur):
+    cur.execute("SELECT key, value FROM organization_settings ORDER BY id")
+    rows = cur.fetchall()
+    return {r[0]: r[1] for r in rows}
+
+def build_pdf_header(font_r, font_b, org=None):
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_LEFT
+
+    if org is None:
+        org = {}
+    org_name = org.get('name') or 'КПК «ЭКСПЕРТ ФИНАНС»'
+    org_phone = org.get('phone') or '8 (800) 700-89-09'
+    contacts = []
+    if org.get('website'):
+        contacts.append('Сайт: %s' % org['website'])
+    if org.get('email'):
+        contacts.append('Email: %s' % org['email'])
+    if org.get('telegram'):
+        contacts.append('Telegram: %s' % org['telegram'])
+    if org.get('whatsapp'):
+        contacts.append('WhatsApp: %s' % org['whatsapp'])
+    if not contacts:
+        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
+    contacts_line = '    '.join(contacts)
 
     logo_path = get_logo_path()
     logo = Image(logo_path, width=24*mm, height=24*mm)
@@ -1145,10 +1167,10 @@ def build_pdf_header(font_r, font_b):
     contact_s = ParagraphStyle('HC', fontName=font_r, fontSize=6.5, leading=9, textColor=colors.HexColor('#555555'))
 
     inner_data = [
-        [Paragraph('КПК «ЭКСПЕРТ ФИНАНС»', name_s)],
+        [Paragraph(org_name, name_s)],
         [Paragraph('Работаем с финансами, думаем о людях', slogan_s)],
-        [Paragraph('Тел: 8 (800) 700-89-09', phone_s)],
-        [Paragraph('Сайт: nfofinans.ru    Email: info@sll-expert.ru    Telegram: @nfofinans_161    WhatsApp: +79613032756', contact_s)],
+        [Paragraph('Тел: %s' % org_phone, phone_s)],
+        [Paragraph(contacts_line, contact_s)],
     ]
     inner = Table(inner_data, colWidths=[None])
     inner.setStyle(TableStyle([
@@ -1172,9 +1194,27 @@ def build_pdf_header(font_r, font_b):
 
     return [header, Spacer(1, 3), line, Spacer(1, 8)]
 
-def build_xlsx_header(ws):
+def build_xlsx_header(ws, org=None):
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
     from openpyxl.drawing.image import Image as XlImage
+
+    if org is None:
+        org = {}
+    org_name = org.get('name') or 'КПК «ЭКСПЕРТ ФИНАНС»'
+    org_phone = org.get('phone') or '8 (800) 700-89-09'
+    contacts = []
+    if org.get('website'):
+        contacts.append('Сайт: %s' % org['website'])
+    if org.get('email'):
+        contacts.append('Email: %s' % org['email'])
+    if org.get('telegram'):
+        contacts.append('Telegram: %s' % org['telegram'])
+    if org.get('whatsapp'):
+        contacts.append('WhatsApp: %s' % org['whatsapp'])
+    if not contacts:
+        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
+    contacts_line = '    '.join(contacts)
+
     logo_path = get_logo_path()
     img = XlImage(logo_path)
     img.width = 80
@@ -1186,14 +1226,14 @@ def build_xlsx_header(ws):
     ws.row_dimensions[4].height = 15
     ws.row_dimensions[5].height = 12
     ws.merge_cells('B1:F2')
-    ws['B1'] = 'КПК «ЭКСПЕРТ ФИНАНС»'
+    ws['B1'] = org_name
     ws['B1'].font = Font(bold=True, size=14, color='1a3c5e')
     ws['B1'].alignment = Alignment(vertical='center')
     ws['B3'] = 'Работаем с финансами, думаем о людях'
     ws['B3'].font = Font(italic=True, size=8, color='888888')
-    ws['B4'] = 'Тел: 8 (800) 700-89-09'
+    ws['B4'] = 'Тел: %s' % org_phone
     ws['B4'].font = Font(bold=True, size=9, color='333333')
-    ws['B5'] = 'Сайт: nfofinans.ru    Email: info@sll-expert.ru    Telegram: @nfofinans_161    WhatsApp: +79613032756'
+    ws['B5'] = contacts_line
     ws['B5'].font = Font(size=7, color='555555')
     line_border = Border(bottom=Side(style='medium', color='2e5d8a'))
     for col in range(1, 8):
@@ -1201,7 +1241,7 @@ def build_xlsx_header(ws):
     ws.row_dimensions[6].height = 5
     return 8
 
-def generate_loan_xlsx(loan, schedule, payments, member_name):
+def generate_loan_xlsx(loan, schedule, payments, member_name, org=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
@@ -1215,7 +1255,7 @@ def generate_loan_xlsx(loan, schedule, payments, member_name):
     title_font = Font(bold=True, size=14)
     header_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
 
-    row = build_xlsx_header(ws)
+    row = build_xlsx_header(ws, org)
 
     ws.merge_cells('A%d:F%d' % (row, row))
     ws['A%d' % row] = 'Выписка по договору займа %s' % loan.get('contract_no', '')
@@ -1343,7 +1383,7 @@ def generate_loan_xlsx(loan, schedule, payments, member_name):
     wb.save(buf)
     return buf.getvalue()
 
-def generate_loan_pdf(loan, schedule, payments, member_name):
+def generate_loan_pdf(loan, schedule, payments, member_name, org=None):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
@@ -1356,7 +1396,7 @@ def generate_loan_pdf(loan, schedule, payments, member_name):
     styles = getSampleStyleSheet()
     story = []
 
-    story.extend(build_pdf_header(font_r, font_b))
+    story.extend(build_pdf_header(font_r, font_b, org))
 
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
@@ -1438,7 +1478,7 @@ def generate_loan_pdf(loan, schedule, payments, member_name):
     doc.build(story)
     return buf.getvalue()
 
-def generate_savings_xlsx(saving, schedule, transactions, member_name):
+def generate_savings_xlsx(saving, schedule, transactions, member_name, org=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
@@ -1451,7 +1491,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name):
     header_font = Font(bold=True, size=11)
     header_fill = PatternFill(start_color='D6EAF8', end_color='D6EAF8', fill_type='solid')
 
-    row = build_xlsx_header(ws)
+    row = build_xlsx_header(ws, org)
 
     ws.merge_cells('A%d:F%d' % (row, row))
     ws['A%d' % row] = 'Выписка по договору сбережений %s' % saving.get('contract_no', '')
@@ -1543,7 +1583,7 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name):
     wb.save(buf)
     return buf.getvalue()
 
-def generate_savings_pdf(saving, schedule, transactions, member_name):
+def generate_savings_pdf(saving, schedule, transactions, member_name, org=None):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
@@ -1556,7 +1596,7 @@ def generate_savings_pdf(saving, schedule, transactions, member_name):
     styles = getSampleStyleSheet()
     story = []
 
-    story.extend(build_pdf_header(font_r, font_b))
+    story.extend(build_pdf_header(font_r, font_b, org))
 
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
@@ -1619,7 +1659,7 @@ def generate_savings_pdf(saving, schedule, transactions, member_name):
     doc.build(story)
     return buf.getvalue()
 
-def generate_shares_xlsx(account, transactions, member_name):
+def generate_shares_xlsx(account, transactions, member_name, org=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
@@ -1632,7 +1672,7 @@ def generate_shares_xlsx(account, transactions, member_name):
     header_font = Font(bold=True, size=11)
     header_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
 
-    row = build_xlsx_header(ws)
+    row = build_xlsx_header(ws, org)
 
     ws.merge_cells('A%d:D%d' % (row, row))
     ws['A%d' % row] = 'Выписка по паевому счёту %s' % account.get('account_no', '')
@@ -1690,7 +1730,7 @@ def generate_shares_xlsx(account, transactions, member_name):
     wb.save(buf)
     return buf.getvalue()
 
-def generate_shares_pdf(account, transactions, member_name):
+def generate_shares_pdf(account, transactions, member_name, org=None):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
@@ -1703,7 +1743,7 @@ def generate_shares_pdf(account, transactions, member_name):
     styles = getSampleStyleSheet()
     story = []
 
-    story.extend(build_pdf_header(font_r, font_b))
+    story.extend(build_pdf_header(font_r, font_b, org))
 
     title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
     sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
@@ -1752,6 +1792,8 @@ def handle_export(params, cur):
     if not item_id:
         return None
 
+    org = load_org_settings(cur)
+
     if export_type == 'loan':
         loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
         if not loan:
@@ -1762,11 +1804,11 @@ def handle_export(params, cur):
         schedule = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % item_id)
         payments = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % item_id)
         if format_ == 'pdf':
-            data = generate_loan_pdf(loan, schedule, payments, member_name)
+            data = generate_loan_pdf(loan, schedule, payments, member_name, org)
             ct = 'application/pdf'
             fn = 'loan_%s.pdf' % loan.get('contract_no', item_id)
         else:
-            data = generate_loan_xlsx(loan, schedule, payments, member_name)
+            data = generate_loan_xlsx(loan, schedule, payments, member_name, org)
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'loan_%s.xlsx' % loan.get('contract_no', item_id)
 
@@ -1780,11 +1822,11 @@ def handle_export(params, cur):
         schedule = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % item_id)
         transactions = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % item_id)
         if format_ == 'pdf':
-            data = generate_savings_pdf(saving, schedule, transactions, member_name)
+            data = generate_savings_pdf(saving, schedule, transactions, member_name, org)
             ct = 'application/pdf'
             fn = 'saving_%s.pdf' % saving.get('contract_no', item_id)
         else:
-            data = generate_savings_xlsx(saving, schedule, transactions, member_name)
+            data = generate_savings_xlsx(saving, schedule, transactions, member_name, org)
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'saving_%s.xlsx' % saving.get('contract_no', item_id)
 
@@ -1797,11 +1839,11 @@ def handle_export(params, cur):
         member_name = nr[0] if nr else ''
         transactions = query_rows(cur, "SELECT * FROM share_transactions WHERE account_id=%s ORDER BY transaction_date DESC" % item_id)
         if format_ == 'pdf':
-            data = generate_shares_pdf(account, transactions, member_name)
+            data = generate_shares_pdf(account, transactions, member_name, org)
             ct = 'application/pdf'
             fn = 'share_%s.pdf' % account.get('account_no', item_id)
         else:
-            data = generate_shares_xlsx(account, transactions, member_name)
+            data = generate_shares_xlsx(account, transactions, member_name, org)
             ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             fn = 'share_%s.xlsx' % account.get('account_no', item_id)
     else:
@@ -2264,7 +2306,7 @@ def handle_org_settings(method, body, staff, cur, conn):
         return {r[0]: r[1] for r in rows}
     elif method == 'POST':
         data = body.get('settings', {})
-        allowed = ('name', 'inn', 'ogrn', 'director_fio', 'bank_name', 'bik', 'rs')
+        allowed = ('name', 'inn', 'ogrn', 'director_fio', 'bank_name', 'bik', 'rs', 'phone', 'website', 'email', 'telegram', 'whatsapp')
         for k, v in data.items():
             if k in allowed:
                 cur.execute("INSERT INTO organization_settings (key, value, updated_at) VALUES ('%s', '%s', NOW()) ON CONFLICT (key) DO UPDATE SET value='%s', updated_at=NOW()" % (esc(k), esc(v), esc(v)))

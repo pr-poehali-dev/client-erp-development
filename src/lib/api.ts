@@ -481,6 +481,11 @@ export interface OrgSettings {
   bank_name: string;
   bik: string;
   rs: string;
+  phone: string;
+  website: string;
+  email: string;
+  telegram: string;
+  whatsapp: string;
 }
 
 export default api;
