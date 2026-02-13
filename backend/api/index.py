@@ -114,6 +114,28 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
         })
     return schedule
 
+def recalc_loan_schedule_statuses(cur, lid):
+    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending' WHERE loan_id=%s" % lid)
+    cur.execute("SELECT payment_date, amount FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
+    payments = cur.fetchall()
+    for pay in payments:
+        pay_date, remaining = str(pay[0]), Decimal(str(pay[1]))
+        cur.execute("SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial') ORDER BY payment_no" % lid)
+        sched = cur.fetchall()
+        for sr in sched:
+            if remaining <= 0:
+                break
+            sid, sp, si, spn, spa = sr[0], Decimal(str(sr[1])), Decimal(str(sr[2])), Decimal(str(sr[3])), Decimal(str(sr[4]))
+            total_item = sp + si + spn
+            left = total_item - spa
+            if left <= 0:
+                continue
+            applied = min(remaining, left)
+            new_paid = spa + applied
+            remaining -= applied
+            ns = 'paid' if new_paid >= total_item else 'partial'
+            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
+
 def esc(val):
     return str(val).replace("'", "''") if val else ''
 
@@ -431,6 +453,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
                 elif nb > 0:
                     cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s" % lid)
+            recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s' % (pid, float(new_amount), float(new_pp), float(new_ip)), ip)
             conn.commit()
             return {'success': True}
@@ -445,6 +468,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("DELETE FROM loan_payments WHERE id=%s" % pid)
             if old_pp > 0:
                 cur.execute("UPDATE loans SET balance=balance+%s, status='active', updated_at=NOW() WHERE id=%s" % (float(old_pp), lid))
+            recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'delete_payment', 'loan', lid, '', 'Удалён платёж #%s (ОД: %s)' % (pid, float(old_pp)), ip)
             conn.commit()
             return {'success': True}
