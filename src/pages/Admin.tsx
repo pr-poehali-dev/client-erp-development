@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser } from "@/lib/api";
+import api, { StaffUser, AuditLogEntry } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -20,6 +20,8 @@ const fmtDate = (d: string | null) => {
 };
 
 const roleLabels: Record<string, string> = { admin: "Администратор", manager: "Менеджер", client: "Клиент" };
+const actionLabels: Record<string, string> = { create: "Создание", update: "Изменение", payment: "Платёж", early_repayment: "Досрочное", modify: "Модификация", transaction: "Операция", early_close: "Досрочное закрытие", login: "Вход", login_failed: "Неудачный вход", logout: "Выход", block: "Блокировка" };
+const entityLabels: Record<string, string> = { member: "Пайщик", loan: "Займ", saving: "Сбережение", share: "Паевой счёт", user: "Пользователь", auth: "Авторизация" };
 const statusLabels: Record<string, string> = { active: "Активен", blocked: "Заблокирован" };
 
 const roleColor = (role: string) => {
@@ -53,12 +55,29 @@ const Admin = () => {
   const [form, setForm] = useState({ login: "", name: "", role: "manager", password: "", email: "", phone: "" });
   const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "" });
   const [pwForm, setPwForm] = useState({ old_password: "", new_password: "" });
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(0);
+  const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
     api.users.list().then(setUsers).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
+
+  const loadAudit = (page = 0) => {
+    setAuditLoading(true);
+    const params: Record<string, string | number> = { limit: 50, offset: page * 50 };
+    if (auditFilter.entity) params.filter_entity = auditFilter.entity;
+    if (auditFilter.action) params.filter_action = auditFilter.action;
+    api.audit.list(params).then((res) => {
+      setAuditLog(res.items);
+      setAuditTotal(res.total);
+      setAuditPage(page);
+    }).finally(() => setAuditLoading(false));
+  };
 
   const staffUsers = users.filter((u) => u.role === "admin" || u.role === "manager");
   const clientUsers = users.filter((u) => u.role === "client");
@@ -168,6 +187,7 @@ const Admin = () => {
         <TabsList>
           <TabsTrigger value="users">Сотрудники</TabsTrigger>
           <TabsTrigger value="clients">Клиенты ЛК</TabsTrigger>
+          <TabsTrigger value="audit" onClick={() => { if (auditLog.length === 0) loadAudit(); }}>Журнал действий</TabsTrigger>
           <TabsTrigger value="roles">Роли и права</TabsTrigger>
           <TabsTrigger value="profile">Мой профиль</TabsTrigger>
         </TabsList>
@@ -203,6 +223,98 @@ const Admin = () => {
             <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
           ) : (
             <DataTable columns={columns} data={clientUsers} emptyMessage="Нет клиентов" />
+          )}
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-4 space-y-4">
+          <div className="flex gap-3 items-end flex-wrap">
+            <div className="space-y-1">
+              <Label className="text-xs">Объект</Label>
+              <Select value={auditFilter.entity} onValueChange={(v) => setAuditFilter({ ...auditFilter, entity: v === "all" ? "" : v })}>
+                <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Все" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="member">Пайщики</SelectItem>
+                  <SelectItem value="loan">Займы</SelectItem>
+                  <SelectItem value="saving">Сбережения</SelectItem>
+                  <SelectItem value="share">Паевые счета</SelectItem>
+                  <SelectItem value="user">Пользователи</SelectItem>
+                  <SelectItem value="auth">Авторизация</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Действие</Label>
+              <Select value={auditFilter.action} onValueChange={(v) => setAuditFilter({ ...auditFilter, action: v === "all" ? "" : v })}>
+                <SelectTrigger className="w-[150px] h-9"><SelectValue placeholder="Все" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="create">Создание</SelectItem>
+                  <SelectItem value="update">Изменение</SelectItem>
+                  <SelectItem value="payment">Платёж</SelectItem>
+                  <SelectItem value="early_repayment">Досрочное</SelectItem>
+                  <SelectItem value="modify">Модификация</SelectItem>
+                  <SelectItem value="transaction">Операция</SelectItem>
+                  <SelectItem value="login">Вход</SelectItem>
+                  <SelectItem value="login_failed">Неудачный вход</SelectItem>
+                  <SelectItem value="block">Блокировка</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => loadAudit(0)}>
+              <Icon name="Search" size={14} className="mr-1" /> Применить
+            </Button>
+            <span className="text-xs text-muted-foreground ml-auto">Всего записей: {auditTotal}</span>
+          </div>
+
+          {auditLoading ? (
+            <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
+          ) : (
+            <div className="border rounded-lg overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Дата</th>
+                    <th className="px-3 py-2 text-left font-medium">Пользователь</th>
+                    <th className="px-3 py-2 text-left font-medium">Действие</th>
+                    <th className="px-3 py-2 text-left font-medium">Объект</th>
+                    <th className="px-3 py-2 text-left font-medium">Метка</th>
+                    <th className="px-3 py-2 text-left font-medium">Детали</th>
+                    <th className="px-3 py-2 text-left font-medium">IP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {auditLog.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDate(entry.created_at)}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className="font-medium">{entry.user_name || "—"}</span>
+                        {entry.user_role && <Badge variant="outline" className="ml-1 text-[10px] py-0">{roleLabels[entry.user_role] || entry.user_role}</Badge>}
+                      </td>
+                      <td className="px-3 py-2"><Badge variant={entry.action === "login_failed" || entry.action === "block" ? "destructive" : "secondary"} className="text-[10px]">{actionLabels[entry.action] || entry.action}</Badge></td>
+                      <td className="px-3 py-2 text-xs">{entityLabels[entry.entity] || entry.entity}{entry.entity_id ? ` #${entry.entity_id}` : ""}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{entry.entity_label || "—"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground max-w-[250px] truncate">{entry.details || "—"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{entry.ip || "—"}</td>
+                    </tr>
+                  ))}
+                  {auditLog.length === 0 && (
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">Нет записей</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {auditTotal > 50 && (
+            <div className="flex justify-center gap-2">
+              <Button variant="outline" size="sm" disabled={auditPage === 0} onClick={() => loadAudit(auditPage - 1)}>
+                <Icon name="ChevronLeft" size={14} />
+              </Button>
+              <span className="text-xs self-center">{auditPage + 1} / {Math.ceil(auditTotal / 50)}</span>
+              <Button variant="outline" size="sm" disabled={(auditPage + 1) * 50 >= auditTotal} onClick={() => loadAudit(auditPage + 1)}>
+                <Icon name="ChevronRight" size={14} />
+              </Button>
+            </div>
           )}
         </TabsContent>
 

@@ -126,6 +126,11 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "users", action: "update", ...data }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "users", action: "delete", id }),
   },
+
+  audit: {
+    list: (params?: { limit?: number; offset?: number; filter_entity?: string; filter_action?: string }) =>
+      request<AuditListResult>("GET", { entity: "audit", ...params }),
+  },
 };
 
 export interface DashboardStats {
@@ -384,6 +389,25 @@ export interface StaffUser {
   member_id: number | null;
   last_login: string | null;
   created_at: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  user_id: number | null;
+  user_name: string;
+  user_role: string;
+  action: string;
+  entity: string;
+  entity_id: number | null;
+  entity_label: string;
+  details: string;
+  ip: string;
+  created_at: string;
+}
+
+export interface AuditListResult {
+  items: AuditLogEntry[];
+  total: number;
 }
 
 export default api;

@@ -117,7 +117,16 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
 def esc(val):
     return str(val).replace("'", "''") if val else ''
 
-def handle_members(method, params, body, cur, conn):
+def audit_log(cur, staff, action, entity, entity_id=None, entity_label='', details='', ip=''):
+    uid = staff.get('user_id') if staff else None
+    uname = esc(staff.get('name', '')) if staff else ''
+    urole = staff.get('role', '') if staff else ''
+    cur.execute("INSERT INTO audit_log (user_id, user_name, user_role, action, entity, entity_id, entity_label, details, ip) VALUES (%s, '%s', '%s', '%s', '%s', %s, '%s', '%s', '%s')" % (
+        uid or 'NULL', uname, urole, esc(action), esc(entity),
+        entity_id or 'NULL', esc(entity_label), esc(details), esc(ip)
+    ))
+
+def handle_members(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         member_id = params.get('id')
         if member_id:
@@ -173,6 +182,8 @@ def handle_members(method, params, body, cur, conn):
                 esc(body.get('bank_bik')), esc(body.get('bank_account')),
             ))
         result = cur.fetchone()
+        label = body.get('last_name', body.get('company_name', ''))
+        audit_log(cur, staff, 'create', 'member', result[0], '%s %s' % (result[1], label), '', ip)
         conn.commit()
         return {'id': result[0], 'member_no': result[1]}
 
@@ -192,10 +203,12 @@ def handle_members(method, params, body, cur, conn):
         if updates:
             updates.append("updated_at = NOW()")
             cur.execute("UPDATE members SET %s WHERE id = %s" % (', '.join(updates), member_id))
+            changed = [f for f in body if f not in ('id', 'entity')]
+            audit_log(cur, staff, 'update', 'member', member_id, '', ', '.join(changed), ip)
             conn.commit()
         return {'success': True}
 
-def handle_loans(method, params, body, cur, conn):
+def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
         if action == 'detail':
@@ -249,6 +262,7 @@ def handle_loans(method, params, body, cur, conn):
                     VALUES (%s, %s, '%s', %s, %s, %s, %s)
                 """ % (lid, item['payment_no'], item['payment_date'], item['payment_amount'],
                        item['principal_amount'], item['interest_amount'], item['balance_after']))
+            audit_log(cur, staff, 'create', 'loan', lid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес.' % (a, r, t), ip)
             conn.commit()
             return {'id': lid, 'schedule': schedule, 'monthly_payment': monthly}
 
@@ -341,6 +355,10 @@ def handle_loans(method, params, body, cur, conn):
                         cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_monthly, ne.isoformat(), lid))
                         recalc_schedule = new_sched
 
+            detail = 'Сумма: %s, ОД: %s, %%: %s' % (float(amt), float(pp), float(ip))
+            if recalc_schedule:
+                detail += ', график пересчитан'
+            audit_log(cur, staff, 'payment', 'loan', lid, '', detail, ip)
             conn.commit()
             result = {'success': True, 'new_balance': float(nb), 'principal_part': float(pp), 'interest_part': float(ip), 'penalty_part': float(pnp)}
             if recalc_schedule:
@@ -363,6 +381,7 @@ def handle_loans(method, params, body, cur, conn):
                 cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
                 cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
                 cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, payment_type) VALUES (%s,'%s',%s,%s,'early_full')" % (lid, pd, amt, cb))
+                audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Полное досрочное погашение: %s' % amt, ip)
                 conn.commit()
                 return {'success': True, 'new_balance': 0, 'status': 'closed'}
 
@@ -384,6 +403,7 @@ def handle_loans(method, params, body, cur, conn):
             ne = date.fromisoformat(ns[-1]['payment_date'])
             cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), nt, lid))
             cur.execute("INSERT INTO loan_payments (loan_id,payment_date,amount,principal_part,payment_type) VALUES (%s,'%s',%s,%s,'early_partial')" % (lid, pd, amt, amt))
+            audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Частичное: %s, тип: %s' % (amt, rt), ip)
             conn.commit()
             return {'success': True, 'new_balance': nb, 'new_schedule': ns, 'new_monthly': nm}
 
@@ -403,10 +423,11 @@ def handle_loans(method, params, body, cur, conn):
                 cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
             ne = date.fromisoformat(ns[-1]['payment_date'])
             cur.execute("UPDATE loans SET rate=%s, term_months=%s, monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (r, t, m, ne.isoformat(), lid))
+            audit_log(cur, staff, 'modify', 'loan', lid, '', 'Ставка: %s%%, срок: %s мес.' % (r, t), ip)
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
-def handle_savings(method, params, body, cur, conn):
+def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
         if action == 'detail':
@@ -445,6 +466,7 @@ def handle_savings(method, params, body, cur, conn):
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
+            audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес.' % (a, r, t), ip)
             conn.commit()
             return {'id': sid, 'schedule': schedule}
 
@@ -462,6 +484,8 @@ def handle_savings(method, params, body, cur, conn):
                 cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (a, sid))
             elif tt == 'interest_payout':
                 cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, updated_at=NOW() WHERE id=%s" % (a, sid))
+            tt_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %'}
+            audit_log(cur, staff, 'transaction', 'saving', sid, '', '%s: %s' % (tt_labels.get(tt, tt), a), ip)
             conn.commit()
             return {'success': True}
 
@@ -475,10 +499,11 @@ def handle_savings(method, params, body, cur, conn):
             fa = bal - overpaid if overpaid > 0 else bal
             cur.execute("UPDATE savings SET status='early_closed', current_balance=%s, accrued_interest=%s, updated_at=NOW() WHERE id=%s" % (float(fa), float(ei), sid))
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'early_close','Досрочное закрытие')" % (sid, date.today().isoformat(), float(fa)))
+            audit_log(cur, staff, 'early_close', 'saving', sid, '', 'Возврат: %s' % float(fa), ip)
             conn.commit()
             return {'success': True, 'final_amount': float(fa), 'early_interest': float(ei)}
 
-def handle_shares(method, params, body, cur, conn):
+def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')
         if action == 'detail':
@@ -509,6 +534,7 @@ def handle_shares(method, params, body, cur, conn):
             result = cur.fetchone()
             if a > 0:
                 cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'in','Первоначальный паевой взнос')" % (result[0], date.today().isoformat(), a))
+            audit_log(cur, staff, 'create', 'share', result[0], ano, 'Сумма: %s' % a, ip)
             conn.commit()
             return {'id': result[0], 'account_no': result[1]}
         elif action == 'transaction':
@@ -525,6 +551,8 @@ def handle_shares(method, params, body, cur, conn):
                     return {'error': 'Недостаточно средств'}
                 cur.execute("UPDATE share_accounts SET balance=balance-%s, total_out=total_out+%s, updated_at=NOW() WHERE id=%s" % (a, a, aid))
             cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'%s','%s')" % (aid, td, a, tt, esc(d)))
+            tt_label = 'Внесение' if tt == 'in' else 'Выплата'
+            audit_log(cur, staff, 'transaction', 'share', aid, '', '%s: %s' % (tt_label, a), ip)
             conn.commit()
             return {'success': True}
 
@@ -1132,7 +1160,7 @@ def get_staff_session(params, headers, cur):
         return None
     return {'user_id': row[0], 'name': row[1], 'role': row[2], 'login': row[3]}
 
-def handle_staff_auth(body, cur, conn):
+def handle_staff_auth(body, cur, conn, ip=''):
     action = body.get('action', '')
 
     if action == 'login':
@@ -1144,12 +1172,16 @@ def handle_staff_auth(body, cur, conn):
         cur.execute("SELECT id, name, role, login FROM users WHERE login='%s' AND password_hash='%s' AND role IN ('admin','manager') AND status='active'" % (esc(login), pw_hash))
         row = cur.fetchone()
         if not row:
+            audit_log(cur, None, 'login_failed', 'auth', None, login, '', ip)
+            conn.commit()
             return {'error': 'Неверный логин или пароль'}
         user_id, name, role, ulogin = row
         token = generate_token()
         expires = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
         cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
         cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        staff_info = {'user_id': user_id, 'name': name, 'role': role}
+        audit_log(cur, staff_info, 'login', 'auth', user_id, ulogin, '', ip)
         conn.commit()
         return {'success': True, 'token': token, 'user': {'name': name, 'role': role, 'login': ulogin}}
 
@@ -1219,6 +1251,7 @@ def handle_users(method, params, body, staff, cur, conn):
             pw_hash = hash_password(password)
             cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash) VALUES ('%s','%s','%s','%s','%s','%s') RETURNING id" % (esc(login), esc(name), esc(email), esc(phone), role, pw_hash))
             uid = cur.fetchone()[0]
+            audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), '', '')
             conn.commit()
             return {'id': uid, 'login': login}
         elif action == 'update':
@@ -1237,6 +1270,10 @@ def handle_users(method, params, body, staff, cur, conn):
                 updates.append("password_hash='%s'" % hash_password(body['password']))
             if updates:
                 cur.execute("UPDATE users SET %s WHERE id=%s" % (', '.join(updates), uid))
+                changed = [f for f in body if f not in ('id', 'entity', 'action', 'password')]
+                if body.get('password'):
+                    changed.append('password')
+                audit_log(cur, staff, 'update', 'user', uid, '', ', '.join(changed), '')
                 conn.commit()
             return {'success': True}
         elif action == 'delete':
@@ -1247,6 +1284,7 @@ def handle_users(method, params, body, staff, cur, conn):
                 return {'error': 'Нельзя удалить самого себя'}
             cur.execute("UPDATE users SET status='blocked' WHERE id=%s" % uid)
             cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE user_id=%s" % uid)
+            audit_log(cur, staff, 'block', 'user', uid, '', '', '')
             conn.commit()
             return {'success': True}
     return {'error': 'Неизвестное действие'}
@@ -1458,7 +1496,25 @@ def handle_cabinet(method, params, body, headers, cur):
 
     return {'error': 'Неизвестное действие'}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users'}
+def handle_audit(params, staff, cur):
+    if staff.get('role') != 'admin':
+        return {'_status': 403, 'error': 'Только администратор может просматривать журнал'}
+    limit = min(int(params.get('limit', 100)), 500)
+    offset = int(params.get('offset', 0))
+    entity_filter = params.get('filter_entity', '')
+    action_filter = params.get('filter_action', '')
+    where = []
+    if entity_filter:
+        where.append("entity='%s'" % esc(entity_filter))
+    if action_filter:
+        where.append("action='%s'" % esc(action_filter))
+    where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+    cur.execute("SELECT COUNT(*) FROM audit_log%s" % where_sql)
+    total = cur.fetchone()[0]
+    rows = query_rows(cur, "SELECT * FROM audit_log%s ORDER BY created_at DESC LIMIT %s OFFSET %s" % (where_sql, limit, offset))
+    return {'items': rows, 'total': total}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, личный кабинет, авторизация"""
@@ -1473,10 +1529,13 @@ def handler(event, context):
 
     entity = params.get('entity') or body.get('entity', 'dashboard')
 
+    src_ip = (event.get('requestContext') or {}).get('identity', {}).get('sourceIp', '')
+
     conn = get_conn()
     cur = conn.cursor()
 
     try:
+        staff = None
         if entity in PROTECTED_ENTITIES:
             staff = get_staff_session(params, ev_headers, cur)
             if not staff:
@@ -1485,7 +1544,7 @@ def handler(event, context):
             if staff['role'] == 'manager':
                 if method == 'DELETE':
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
-                if entity == 'users':
+                if entity in ('users', 'audit'):
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Недостаточно прав'})}
                 action = params.get('action') or body.get('action', '')
                 if action == 'delete':
@@ -1494,19 +1553,21 @@ def handler(event, context):
         if entity == 'dashboard':
             result = handle_dashboard(cur)
         elif entity == 'members':
-            result = handle_members(method, params, body, cur, conn)
+            result = handle_members(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
-            result = handle_loans(method, params, body, cur, conn)
+            result = handle_loans(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'savings':
-            result = handle_savings(method, params, body, cur, conn)
+            result = handle_savings(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'shares':
-            result = handle_shares(method, params, body, cur, conn)
+            result = handle_shares(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'export':
             result = handle_export(params, cur)
         elif entity == 'users':
             result = handle_users(method, params, body, staff, cur, conn)
+        elif entity == 'audit':
+            result = handle_audit(params, staff, cur)
         elif entity == 'staff_auth':
-            result = handle_staff_auth(body, cur, conn)
+            result = handle_staff_auth(body, cur, conn, src_ip)
         elif entity == 'auth':
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
