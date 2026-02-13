@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
+import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import api, { Loan, LoanDetail, Member, ScheduleItem } from "@/lib/api";
 
@@ -218,10 +219,7 @@ const Loans = () => {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label className="text-xs">Пайщик *</Label>
-              <Select value={form.member_id} onValueChange={v => setForm(p => ({ ...p, member_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Выберите пайщика" /></SelectTrigger>
-                <SelectContent>{members.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name} ({m.member_no})</SelectItem>)}</SelectContent>
-              </Select>
+              <MemberSearch members={members} value={form.member_id} onChange={(id) => setForm(p => ({ ...p, member_id: id }))} />
             </div>
             <div className="space-y-1.5"><Label className="text-xs">Номер договора *</Label><Input value={form.contract_no} onChange={e => setForm(p => ({ ...p, contract_no: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">

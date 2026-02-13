@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
+import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import api, { ShareAccount, Member } from "@/lib/api";
 
@@ -107,10 +108,7 @@ const Shares = () => {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label className="text-xs">Пайщик *</Label>
-              <Select value={createForm.member_id} onValueChange={v => setCreateForm(p => ({ ...p, member_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Выберите пайщика" /></SelectTrigger>
-                <SelectContent>{members.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name} ({m.member_no})</SelectItem>)}</SelectContent>
-              </Select>
+              <MemberSearch members={members} value={createForm.member_id} onChange={(id) => setCreateForm(p => ({ ...p, member_id: id }))} />
             </div>
             <div className="space-y-1.5"><Label className="text-xs">Сумма паевого взноса, ₽</Label><Input type="number" value={createForm.amount} onChange={e => setCreateForm(p => ({ ...p, amount: e.target.value }))} /></div>
             <p className="text-xs text-muted-foreground">Номер счёта будет сформирован автоматически</p>
