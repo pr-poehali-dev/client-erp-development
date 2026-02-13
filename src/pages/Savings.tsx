@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -7,160 +7,158 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
+import { useToast } from "@/hooks/use-toast";
+import api, { Saving, Member, SavingsScheduleItem } from "@/lib/api";
 
-interface Saving {
-  id: string;
-  contractNo: string;
-  memberName: string;
-  amount: string;
-  rate: string;
-  term: string;
-  accrued: string;
-  startDate: string;
-  endDate: string;
-  payoutType: string;
-  status: string;
-  [key: string]: unknown;
-}
-
-const mockSavings: Saving[] = [
-  { id: "1", contractNo: "С-2024-001", memberName: "Петрова А.С.", amount: "1 000 000 ₽", rate: "12%", term: "12 мес.", accrued: "45 000 ₽", startDate: "01.02.2024", endDate: "01.02.2025", payoutType: "Ежемесячно", status: "Активен" },
-  { id: "2", contractNo: "С-2024-010", memberName: "Морозова Е.К.", amount: "500 000 ₽", rate: "14%", term: "24 мес.", accrued: "87 500 ₽", startDate: "15.03.2024", endDate: "15.03.2026", payoutType: "В конце срока", status: "Активен" },
-  { id: "3", contractNo: "С-2024-018", memberName: "Иванов И.И.", amount: "2 500 000 ₽", rate: "11%", term: "6 мес.", accrued: "68 750 ₽", startDate: "01.05.2024", endDate: "01.11.2024", payoutType: "Ежемесячно", status: "Активен" },
-  { id: "4", contractNo: "С-2023-055", memberName: "Белов Д.С.", amount: "300 000 ₽", rate: "10%", term: "12 мес.", accrued: "30 000 ₽", startDate: "01.06.2023", endDate: "01.06.2024", payoutType: "В конце срока", status: "Закрыт" },
-];
+const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
+const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 
 const columns: Column<Saving>[] = [
-  { key: "contractNo", label: "Договор", className: "font-medium" },
-  { key: "memberName", label: "Пайщик" },
-  { key: "amount", label: "Сумма вклада" },
-  { key: "rate", label: "Ставка" },
-  { key: "term", label: "Срок" },
-  { key: "accrued", label: "Начислено %" },
-  { key: "payoutType", label: "Выплата", render: (item) => <span className="text-xs">{item.payoutType}</span> },
-  { key: "endDate", label: "Окончание" },
-  {
-    key: "status",
-    label: "Статус",
-    render: (item) => (
-      <Badge variant={item.status === "Активен" ? "default" : "secondary"} className="text-xs">
-        {item.status}
-      </Badge>
-    ),
-  },
+  { key: "contract_no", label: "Договор", className: "font-medium" },
+  { key: "member_name", label: "Пайщик" },
+  { key: "amount", label: "Сумма вклада", render: (i: Saving) => fmt(i.amount) },
+  { key: "rate", label: "Ставка", render: (i: Saving) => i.rate + "%" },
+  { key: "term_months", label: "Срок", render: (i: Saving) => i.term_months + " мес." },
+  { key: "accrued_interest", label: "Начислено %", render: (i: Saving) => fmt(i.accrued_interest) },
+  { key: "payout_type", label: "Выплата", render: (i: Saving) => <span className="text-xs">{i.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</span> },
+  { key: "end_date", label: "Окончание", render: (i: Saving) => fmtDate(i.end_date) },
+  { key: "status", label: "Статус", render: (i: Saving) => <Badge variant={i.status === "active" ? "default" : "secondary"} className="text-xs">{i.status === "active" ? "Активен" : "Закрыт"}</Badge> },
 ];
 
 const Savings = () => {
+  const [items, setItems] = useState<Saving[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<SavingsScheduleItem[] | null>(null);
+  const { toast } = useToast();
 
-  const filtered = mockSavings.filter(
-    (s) =>
-      s.contractNo.toLowerCase().includes(search.toLowerCase()) ||
-      s.memberName.toLowerCase().includes(search.toLowerCase())
-  );
+  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10) });
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([api.savings.list(), api.members.list()]).then(([s, m]) => { setItems(s); setMembers(m); }).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const filtered = items.filter(s => s.contract_no?.toLowerCase().includes(search.toLowerCase()) || s.member_name?.toLowerCase().includes(search.toLowerCase()));
+
+  const handleCalc = async () => {
+    if (!form.amount || !form.rate || !form.term_months) return;
+    const res = await api.savings.calcSchedule(Number(form.amount), Number(form.rate), Number(form.term_months), form.payout_type, form.start_date);
+    setPreview(res.schedule);
+  };
+
+  const handleCreate = async () => {
+    setSaving(true);
+    try {
+      await api.savings.create({
+        contract_no: form.contract_no, member_id: Number(form.member_id),
+        amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
+        payout_type: form.payout_type, start_date: form.start_date,
+      });
+      toast({ title: "Договор сбережений создан" });
+      setShowForm(false);
+      setPreview(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64"><Icon name="Loader2" size={32} className="animate-spin text-primary" /></div>;
+
+  const totalSavings = items.filter(s => s.status === "active").reduce((s, i) => s + i.current_balance, 0);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader
-        title="Сбережения"
-        description={`${mockSavings.filter(s => s.status === "Активен").length} активных договоров`}
-        actionLabel="Новый договор"
-        actionIcon="Plus"
-        onAction={() => setShowForm(true)}
-      />
+      <PageHeader title="Сбережения" description={`${items.filter(s => s.status === "active").length} активных договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10) }); setPreview(null); setShowForm(true); }} />
 
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Общая сумма вкладов</div>
-          <div className="text-xl font-bold">58.2 млн ₽</div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Средняя ставка</div>
-          <div className="text-xl font-bold">11.8%</div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Начислено % за месяц</div>
-          <div className="text-xl font-bold">572 000 ₽</div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Истекает в этом месяце</div>
-          <div className="text-xl font-bold text-warning">3</div>
-        </Card>
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Общая сумма вкладов</div><div className="text-xl font-bold">{fmt(totalSavings)}</div></Card>
+        <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Активных договоров</div><div className="text-xl font-bold">{items.filter(s => s.status === "active").length}</div></Card>
+        <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Всего договоров</div><div className="text-xl font-bold">{items.length}</div></Card>
       </div>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Icon name="Search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Поиск по договору, пайщику..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
+          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
         </div>
-        <Button variant="outline" className="gap-2">
-          <Icon name="Filter" size={16} />
-          Фильтры
-        </Button>
       </div>
 
-      <DataTable columns={columns} data={filtered} emptyMessage="Договоры не найдены" />
+      <DataTable columns={columns} data={filtered} emptyMessage="Договоры не найдены. Создайте первый договор сбережений." />
 
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Новый договор сбережений</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Новый договор сбережений</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label className="text-xs">Пайщик</Label>
-              <Select>
+              <Label className="text-xs">Пайщик *</Label>
+              <Select value={form.member_id} onValueChange={v => setForm(p => ({ ...p, member_id: v }))}>
                 <SelectTrigger><SelectValue placeholder="Выберите пайщика" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Иванов Иван Иванович (П-001)</SelectItem>
-                  <SelectItem value="2">Петрова Анна Сергеевна (П-002)</SelectItem>
-                  <SelectItem value="3">ООО «Рассвет» (П-003)</SelectItem>
-                </SelectContent>
+                <SelectContent>{members.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name} ({m.member_no})</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Номер договора</Label>
-              <Input placeholder="С-2024-020" />
-            </div>
+            <div className="space-y-1.5"><Label className="text-xs">Номер договора *</Label><Input value={form.contract_no} onChange={e => setForm(p => ({ ...p, contract_no: e.target.value }))} /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Сумма вклада, ₽</Label>
-                <Input type="number" placeholder="1000000" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Ставка, % годовых</Label>
-                <Input type="number" placeholder="12" />
-              </div>
+              <div className="space-y-1.5"><Label className="text-xs">Сумма вклада, ₽ *</Label><Input type="number" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Ставка, % годовых *</Label><Input type="number" value={form.rate} onChange={e => setForm(p => ({ ...p, rate: e.target.value }))} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Срок, месяцев</Label>
-                <Input type="number" placeholder="12" />
-              </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5"><Label className="text-xs">Срок, месяцев *</Label><Input type="number" value={form.term_months} onChange={e => setForm(p => ({ ...p, term_months: e.target.value }))} /></div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Вариант выплаты</Label>
-                <Select>
-                  <SelectTrigger><SelectValue placeholder="Выберите" /></SelectTrigger>
+                <Select value={form.payout_type} onValueChange={v => setForm(p => ({ ...p, payout_type: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="monthly">Ежемесячно</SelectItem>
-                    <SelectItem value="end">В конце срока</SelectItem>
+                    <SelectItem value="end_of_term">В конце срока</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5"><Label className="text-xs">Дата начала</Label><Input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} /></div>
             </div>
+
+            <Button variant="outline" onClick={handleCalc} className="gap-2"><Icon name="Calculator" size={16} />Рассчитать график</Button>
+
+            {preview && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm">График доходности</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left py-2 px-2">№</th><th className="text-left py-2 px-2">Период</th>
+                        <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Накоплено</th>
+                        <th className="text-right py-2 px-2">Баланс</th>
+                      </tr></thead>
+                      <tbody>{preview.map(r => (
+                        <tr key={r.period_no} className="border-b last:border-0">
+                          <td className="py-1.5 px-2">{r.period_no}</td>
+                          <td className="py-1.5 px-2">{fmtDate(r.period_start)} — {fmtDate(r.period_end)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.interest_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.cumulative_interest)}</td>
+                          <td className="py-1.5 px-2 text-right font-medium">{fmt(r.balance_after)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
-              <Button className="gap-2">
-                <Icon name="Calculator" size={16} />
-                Рассчитать и сохранить
+              <Button onClick={handleCreate} disabled={saving || !form.contract_no || !form.member_id || !form.amount} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                Сохранить договор
               </Button>
             </div>
           </div>

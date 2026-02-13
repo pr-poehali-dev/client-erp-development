@@ -1,0 +1,537 @@
+import json
+import os
+import psycopg2
+from datetime import datetime, date
+from decimal import Decimal, ROUND_HALF_UP
+import calendar
+
+def get_conn():
+    return psycopg2.connect(os.environ['DATABASE_URL'])
+
+def last_day_of_month(d):
+    return d.replace(day=calendar.monthrange(d.year, d.month)[1])
+
+def add_months(d, months):
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+def serialize(val):
+    if isinstance(val, Decimal):
+        return float(val)
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
+    return val
+
+def query_rows(cur, sql):
+    cur.execute(sql)
+    cols = [d[0] for d in cur.description]
+    return [{cols[i]: serialize(r[i]) for i in range(len(cols))} for r in cur.fetchall()]
+
+def query_one(cur, sql):
+    cur.execute(sql)
+    if cur.rowcount == 0:
+        return None
+    cols = [d[0] for d in cur.description]
+    row = cur.fetchone()
+    return {cols[i]: serialize(row[i]) for i in range(len(cols))}
+
+def calc_annuity_schedule(amount, rate, term, start_date):
+    monthly_rate = Decimal(str(rate)) / Decimal('100') / Decimal('12')
+    amt = Decimal(str(amount))
+    if monthly_rate > 0:
+        annuity = amt * monthly_rate * (1 + monthly_rate) ** term / ((1 + monthly_rate) ** term - 1)
+    else:
+        annuity = amt / term
+    annuity = annuity.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    schedule = []
+    balance = amt
+    for i in range(1, term + 1):
+        payment_date = last_day_of_month(add_months(start_date, i))
+        days_in_month = calendar.monthrange(payment_date.year, payment_date.month)[1]
+        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if i == term:
+            principal = balance
+            payment = principal + interest
+        else:
+            principal = annuity - interest
+            if principal < 0:
+                principal = Decimal('0')
+            payment = annuity
+        balance = balance - principal
+        if balance < 0:
+            balance = Decimal('0')
+        schedule.append({
+            'payment_no': i, 'payment_date': payment_date.isoformat(),
+            'payment_amount': float(payment), 'principal_amount': float(principal),
+            'interest_amount': float(interest), 'balance_after': float(balance),
+        })
+    return schedule, float(annuity)
+
+def calc_end_of_term_schedule(amount, rate, term, start_date):
+    amt = Decimal(str(amount))
+    schedule = []
+    balance = amt
+    for i in range(1, term + 1):
+        payment_date = last_day_of_month(add_months(start_date, i))
+        days_in_month = calendar.monthrange(payment_date.year, payment_date.month)[1]
+        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if i == term:
+            principal = balance
+            payment = principal + interest
+            balance = Decimal('0')
+        else:
+            principal = Decimal('0')
+            payment = interest
+        schedule.append({
+            'payment_no': i, 'payment_date': payment_date.isoformat(),
+            'payment_amount': float(payment), 'principal_amount': float(principal),
+            'interest_amount': float(interest), 'balance_after': float(balance),
+        })
+    return schedule, float(schedule[0]['payment_amount']) if schedule else 0
+
+def calc_savings_schedule(amount, rate, term, start_date, payout_type):
+    amt = Decimal(str(amount))
+    schedule = []
+    cumulative = Decimal('0')
+    for i in range(1, term + 1):
+        period_start = last_day_of_month(add_months(start_date, i - 1)) if i > 1 else start_date
+        period_end = last_day_of_month(add_months(start_date, i))
+        days_in_month = calendar.monthrange(period_end.year, period_end.month)[1]
+        interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        cumulative += interest
+        balance_after = float(amt + cumulative) if payout_type == 'end_of_term' else float(amt)
+        schedule.append({
+            'period_no': i, 'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(), 'interest_amount': float(interest),
+            'cumulative_interest': float(cumulative), 'balance_after': balance_after,
+        })
+    return schedule
+
+def esc(val):
+    return str(val).replace("'", "''") if val else ''
+
+def handle_members(method, params, body, cur, conn):
+    if method == 'GET':
+        member_id = params.get('id')
+        if member_id:
+            return query_one(cur, "SELECT * FROM members WHERE id = %s" % member_id)
+        return query_rows(cur, """
+            SELECT m.id, m.member_no, m.member_type,
+                   CASE WHEN m.member_type = 'FL' THEN CONCAT(m.last_name, ' ', m.first_name, ' ', m.middle_name)
+                        ELSE m.company_name END as name,
+                   m.inn, m.phone, m.email, m.status, m.created_at,
+                   (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.status != 'closed') as active_loans,
+                   (SELECT COUNT(*) FROM savings s WHERE s.member_id = m.id AND s.status = 'active') as active_savings
+            FROM members m WHERE m.status != 'deleted' ORDER BY m.created_at DESC
+        """)
+
+    elif method == 'POST':
+        mt = body.get('member_type', 'FL')
+        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM members")
+        next_id = cur.fetchone()[0]
+        member_no = 'П-%06d' % next_id
+
+        if mt == 'FL':
+            cur.execute("""
+                INSERT INTO members (member_no, member_type, last_name, first_name, middle_name,
+                    birth_date, birth_place, inn, passport_series, passport_number,
+                    passport_dept_code, passport_issue_date, passport_issued_by,
+                    registration_address, phone, email, telegram, bank_bik, bank_account,
+                    marital_status, spouse_fio, spouse_phone, extra_phone, extra_contact_fio)
+                VALUES ('%s', 'FL', '%s', '%s', '%s', %s, '%s', '%s', '%s', '%s', '%s', %s, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+                RETURNING id, member_no
+            """ % (
+                member_no, esc(body.get('last_name')), esc(body.get('first_name')), esc(body.get('middle_name')),
+                ("'%s'" % body['birth_date']) if body.get('birth_date') else 'NULL',
+                esc(body.get('birth_place')), esc(body.get('inn')),
+                esc(body.get('passport_series')), esc(body.get('passport_number')),
+                esc(body.get('passport_dept_code')),
+                ("'%s'" % body['passport_issue_date']) if body.get('passport_issue_date') else 'NULL',
+                esc(body.get('passport_issued_by')), esc(body.get('registration_address')),
+                esc(body.get('phone')), esc(body.get('email')), esc(body.get('telegram')),
+                esc(body.get('bank_bik')), esc(body.get('bank_account')),
+                esc(body.get('marital_status')), esc(body.get('spouse_fio')),
+                esc(body.get('spouse_phone')), esc(body.get('extra_phone')), esc(body.get('extra_contact_fio')),
+            ))
+        else:
+            cur.execute("""
+                INSERT INTO members (member_no, member_type, inn, company_name, director_fio,
+                    director_phone, contact_person_fio, contact_person_phone, bank_bik, bank_account)
+                VALUES ('%s', 'UL', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+                RETURNING id, member_no
+            """ % (
+                member_no, esc(body.get('inn')), esc(body.get('company_name')),
+                esc(body.get('director_fio')), esc(body.get('director_phone')),
+                esc(body.get('contact_person_fio')), esc(body.get('contact_person_phone')),
+                esc(body.get('bank_bik')), esc(body.get('bank_account')),
+            ))
+        result = cur.fetchone()
+        conn.commit()
+        return {'id': result[0], 'member_no': result[1]}
+
+    elif method == 'PUT':
+        member_id = body.get('id')
+        updates = []
+        for f in ['last_name','first_name','middle_name','birth_place','inn','passport_series','passport_number',
+                   'passport_dept_code','passport_issued_by','registration_address','phone','email','telegram',
+                   'bank_bik','bank_account','marital_status','spouse_fio','spouse_phone','extra_phone',
+                   'extra_contact_fio','company_name','director_fio','director_phone','contact_person_fio',
+                   'contact_person_phone','status']:
+            if f in body:
+                updates.append("%s = '%s'" % (f, esc(body[f])))
+        for f in ['birth_date','passport_issue_date']:
+            if f in body and body[f]:
+                updates.append("%s = '%s'" % (f, body[f]))
+        if updates:
+            updates.append("updated_at = NOW()")
+            cur.execute("UPDATE members SET %s WHERE id = %s" % (', '.join(updates), member_id))
+            conn.commit()
+        return {'success': True}
+
+def handle_loans(method, params, body, cur, conn):
+    if method == 'GET':
+        action = params.get('action', 'list')
+        if action == 'detail':
+            loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % params['id'])
+            if not loan:
+                return None
+            cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
+            nr = cur.fetchone()
+            loan['member_name'] = nr[0] if nr else ''
+            loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
+            loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
+            return loan
+        elif action == 'schedule':
+            a, r, t = float(params['amount']), float(params['rate']), int(params['term'])
+            st = params.get('schedule_type', 'annuity')
+            sd = date.fromisoformat(params.get('start_date', date.today().isoformat()))
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            schedule, monthly = fn(a, r, t, sd)
+            return {'schedule': schedule, 'monthly_payment': monthly}
+        else:
+            return query_rows(cur, """
+                SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type,
+                       l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
+                       CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                            ELSE m.company_name END as member_name, m.id as member_id
+                FROM loans l JOIN members m ON m.id=l.member_id ORDER BY l.created_at DESC
+            """)
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            cn = body['contract_no']
+            mid = int(body['member_id'])
+            a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
+            st = body.get('schedule_type', 'annuity')
+            sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
+            ed = last_day_of_month(add_months(sd, t))
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            schedule, monthly = fn(a, r, t, sd)
+
+            cur.execute("""
+                INSERT INTO loans (contract_no, member_id, amount, rate, term_months, schedule_type,
+                    start_date, end_date, monthly_payment, balance, status)
+                VALUES ('%s', %s, %s, %s, %s, '%s', '%s', '%s', %s, %s, 'active') RETURNING id
+            """ % (esc(cn), mid, a, r, t, st, sd.isoformat(), ed.isoformat(), monthly, a))
+            lid = cur.fetchone()[0]
+            for item in schedule:
+                cur.execute("""
+                    INSERT INTO loan_schedule (loan_id, payment_no, payment_date, payment_amount,
+                        principal_amount, interest_amount, balance_after)
+                    VALUES (%s, %s, '%s', %s, %s, %s, %s)
+                """ % (lid, item['payment_no'], item['payment_date'], item['payment_amount'],
+                       item['principal_amount'], item['interest_amount'], item['balance_after']))
+            conn.commit()
+            return {'id': lid, 'schedule': schedule, 'monthly_payment': monthly}
+
+        elif action == 'payment':
+            lid = int(body['loan_id'])
+            pd = body['payment_date']
+            amt = Decimal(str(body['amount']))
+
+            cur.execute("SELECT balance FROM loans WHERE id = %s" % lid)
+            loan_bal = Decimal(str(cur.fetchone()[0]))
+
+            cur.execute("""
+                SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
+                FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+                ORDER BY payment_no LIMIT 1
+            """ % lid)
+            sr = cur.fetchone()
+            remaining = amt
+            pp = ip = pnp = Decimal('0')
+
+            if sr:
+                sid, sp, si, spn, spa = sr[0], Decimal(str(sr[1])), Decimal(str(sr[2])), Decimal(str(sr[3])), Decimal(str(sr[4]))
+                if remaining >= sp:
+                    pp = sp; remaining -= sp
+                else:
+                    pp = remaining; remaining = Decimal('0')
+                if remaining >= si:
+                    ip = si; remaining -= si
+                else:
+                    ip = remaining; remaining = Decimal('0')
+                if remaining >= spn:
+                    pnp = spn; remaining -= spn
+                else:
+                    pnp = remaining; remaining = Decimal('0')
+                total_paid = spa + amt
+                ns = 'paid' if total_paid >= sp + si + spn else 'partial'
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(total_paid), pd, ns, sid))
+
+            cur.execute("""
+                INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, interest_part, penalty_part, payment_type)
+                VALUES (%s, '%s', %s, %s, %s, %s, 'regular')
+            """ % (lid, pd, float(amt), float(pp), float(ip), float(pnp)))
+
+            nb = loan_bal - pp
+            if nb < 0: nb = Decimal('0')
+            cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), lid))
+            if nb == 0:
+                cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % lid)
+            conn.commit()
+            return {'success': True, 'new_balance': float(nb), 'principal_part': float(pp), 'interest_part': float(ip), 'penalty_part': float(pnp)}
+
+        elif action == 'early_repayment':
+            lid = int(body['loan_id'])
+            amt = float(body['amount'])
+            rt = body.get('repayment_type', 'reduce_term')
+            pd = body.get('payment_date', date.today().isoformat())
+
+            cur.execute("SELECT amount, rate, balance, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            cb, r, st = float(lr[2]), float(lr[1]), lr[5]
+            nb = cb - amt
+
+            if nb <= 0:
+                cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
+                cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+                cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, payment_type) VALUES (%s,'%s',%s,%s,'early_full')" % (lid, pd, amt, cb))
+                conn.commit()
+                return {'success': True, 'new_balance': 0, 'status': 'closed'}
+
+            cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+            cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
+            paid_count = cur.fetchone()[0]
+
+            if rt == 'reduce_payment':
+                nt = int(lr[3]) - paid_count
+            else:
+                mp = float(lr[2]) if lr[2] else 0
+                nt = max(int(nb / max(mp / 2, 1)), 1)
+
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            ns, nm = fn(nb, r, max(nt, 1), date.fromisoformat(pd))
+            for item in ns:
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+
+            ne = date.fromisoformat(ns[-1]['payment_date'])
+            cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), nt, lid))
+            cur.execute("INSERT INTO loan_payments (loan_id,payment_date,amount,principal_part,payment_type) VALUES (%s,'%s',%s,%s,'early_partial')" % (lid, pd, amt, amt))
+            conn.commit()
+            return {'success': True, 'new_balance': nb, 'new_schedule': ns, 'new_monthly': nm}
+
+        elif action == 'modify':
+            lid = int(body['loan_id'])
+            cur.execute("SELECT balance, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            bal = float(lr[0])
+            r = float(body['new_rate']) if body.get('new_rate') else float(lr[1])
+            t = int(body['new_term']) if body.get('new_term') else int(lr[2])
+            st = lr[4]
+
+            cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            ns, m = fn(bal, r, t, date.today())
+            for item in ns:
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+            ne = date.fromisoformat(ns[-1]['payment_date'])
+            cur.execute("UPDATE loans SET rate=%s, term_months=%s, monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (r, t, m, ne.isoformat(), lid))
+            conn.commit()
+            return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
+
+def handle_savings(method, params, body, cur, conn):
+    if method == 'GET':
+        action = params.get('action', 'list')
+        if action == 'detail':
+            s = query_one(cur, "SELECT * FROM savings WHERE id=%s" % params['id'])
+            if not s: return None
+            cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % s['member_id'])
+            nr = cur.fetchone()
+            s['member_name'] = nr[0] if nr else ''
+            s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % params['id'])
+            s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % params['id'])
+            return s
+        elif action == 'schedule':
+            a, r, t = float(params['amount']), float(params['rate']), int(params['term'])
+            pt = params.get('payout_type', 'monthly')
+            sd = date.fromisoformat(params.get('start_date', date.today().isoformat()))
+            return {'schedule': calc_savings_schedule(a, r, t, sd, pt)}
+        else:
+            return query_rows(cur, """
+                SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type,
+                       s.start_date, s.end_date, s.accrued_interest, s.paid_interest, s.current_balance, s.status,
+                       CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                            ELSE m.company_name END as member_name, m.id as member_id
+                FROM savings s JOIN members m ON m.id=s.member_id ORDER BY s.created_at DESC
+            """)
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            cn, mid = body['contract_no'], int(body['member_id'])
+            a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
+            pt = body.get('payout_type', 'monthly')
+            sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
+            ed = last_day_of_month(add_months(sd, t))
+            schedule = calc_savings_schedule(a, r, t, sd, pt)
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active') RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a))
+            sid = cur.fetchone()[0]
+            for item in schedule:
+                cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
+            conn.commit()
+            return {'id': sid, 'schedule': schedule}
+
+        elif action == 'transaction':
+            sid = int(body['saving_id'])
+            a = float(body['amount'])
+            tt = body['transaction_type']
+            td = body.get('transaction_date', date.today().isoformat())
+            ic = body.get('is_cash', False)
+            d = body.get('description', '')
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,is_cash,description) VALUES (%s,'%s',%s,'%s',%s,'%s')" % (sid, td, a, tt, ic, esc(d)))
+            if tt == 'deposit':
+                cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (a, a, sid))
+            elif tt == 'withdrawal':
+                cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (a, sid))
+            elif tt == 'interest_payout':
+                cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, updated_at=NOW() WHERE id=%s" % (a, sid))
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'early_close':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT amount, accrued_interest, paid_interest, current_balance FROM savings WHERE id=%s" % sid)
+            sv = cur.fetchone()
+            oa, paid, bal = Decimal(str(sv[0])), Decimal(str(sv[2])), Decimal(str(sv[3]))
+            ei = (oa * Decimal('0.001')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            overpaid = paid - ei
+            fa = bal - overpaid if overpaid > 0 else bal
+            cur.execute("UPDATE savings SET status='early_closed', current_balance=%s, accrued_interest=%s, updated_at=NOW() WHERE id=%s" % (float(fa), float(ei), sid))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'early_close','Досрочное закрытие')" % (sid, date.today().isoformat(), float(fa)))
+            conn.commit()
+            return {'success': True, 'final_amount': float(fa), 'early_interest': float(ei)}
+
+def handle_shares(method, params, body, cur, conn):
+    if method == 'GET':
+        action = params.get('action', 'list')
+        if action == 'detail':
+            acc = query_one(cur, "SELECT * FROM share_accounts WHERE id=%s" % params['id'])
+            if not acc: return None
+            cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % acc['member_id'])
+            nr = cur.fetchone()
+            acc['member_name'] = nr[0] if nr else ''
+            acc['transactions'] = query_rows(cur, "SELECT * FROM share_transactions WHERE account_id=%s ORDER BY transaction_date DESC" % params['id'])
+            return acc
+        else:
+            return query_rows(cur, """
+                SELECT sa.id, sa.account_no, sa.balance, sa.total_in, sa.total_out, sa.status, sa.created_at, sa.updated_at,
+                       CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
+                            ELSE m.company_name END as member_name, m.id as member_id
+                FROM share_accounts sa JOIN members m ON m.id=sa.member_id ORDER BY sa.created_at DESC
+            """)
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            mid = int(body['member_id'])
+            a = float(body.get('amount', 0))
+            cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM share_accounts")
+            ni = cur.fetchone()[0]
+            ano = 'ПС-%06d' % ni
+            cur.execute("INSERT INTO share_accounts (account_no,member_id,balance,total_in) VALUES ('%s',%s,%s,%s) RETURNING id, account_no" % (ano, mid, a, a))
+            result = cur.fetchone()
+            if a > 0:
+                cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'in','Первоначальный паевой взнос')" % (result[0], date.today().isoformat(), a))
+            conn.commit()
+            return {'id': result[0], 'account_no': result[1]}
+        elif action == 'transaction':
+            aid = int(body['account_id'])
+            a = float(body['amount'])
+            tt = body['transaction_type']
+            td = body.get('transaction_date', date.today().isoformat())
+            d = body.get('description', '')
+            if tt == 'in':
+                cur.execute("UPDATE share_accounts SET balance=balance+%s, total_in=total_in+%s, updated_at=NOW() WHERE id=%s" % (a, a, aid))
+            else:
+                cur.execute("SELECT balance FROM share_accounts WHERE id=%s" % aid)
+                if float(cur.fetchone()[0]) < a:
+                    return {'error': 'Недостаточно средств'}
+                cur.execute("UPDATE share_accounts SET balance=balance-%s, total_out=total_out+%s, updated_at=NOW() WHERE id=%s" % (a, a, aid))
+            cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'%s','%s')" % (aid, td, a, tt, esc(d)))
+            conn.commit()
+            return {'success': True}
+
+def handle_dashboard(cur):
+    stats = {}
+    cur.execute("SELECT COUNT(*) FROM members WHERE status='active'")
+    stats['total_members'] = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*), COALESCE(SUM(balance),0) FROM loans WHERE status='active'")
+    r = cur.fetchone()
+    stats['active_loans'] = r[0]
+    stats['loan_portfolio'] = float(r[1])
+    cur.execute("SELECT COUNT(*) FROM loans WHERE status='overdue'")
+    stats['overdue_loans'] = cur.fetchone()[0]
+    cur.execute("SELECT COALESCE(SUM(current_balance),0) FROM savings WHERE status='active'")
+    stats['total_savings'] = float(cur.fetchone()[0])
+    cur.execute("SELECT COALESCE(SUM(balance),0) FROM share_accounts WHERE status='active'")
+    stats['total_shares'] = float(cur.fetchone()[0])
+    return stats
+
+def handler(event, context):
+    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета"""
+    if event.get('httpMethod') == 'OPTIONS':
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400'}, 'body': ''}
+
+    headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
+    method = event.get('httpMethod', 'GET')
+    params = event.get('queryStringParameters') or {}
+    body = json.loads(event.get('body', '{}')) if event.get('body') else {}
+
+    entity = params.get('entity') or body.get('entity', 'dashboard')
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        if entity == 'dashboard':
+            result = handle_dashboard(cur)
+        elif entity == 'members':
+            result = handle_members(method, params, body, cur, conn)
+        elif entity == 'loans':
+            result = handle_loans(method, params, body, cur, conn)
+        elif entity == 'savings':
+            result = handle_savings(method, params, body, cur, conn)
+        elif entity == 'shares':
+            result = handle_shares(method, params, body, cur, conn)
+        else:
+            return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
+
+        if result is None:
+            return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'Не найдено'})}
+
+        if isinstance(result, dict) and 'error' in result:
+            return {'statusCode': 400, 'headers': headers, 'body': json.dumps(result)}
+
+        code = 201 if method == 'POST' else 200
+        return {'statusCode': code, 'headers': headers, 'body': json.dumps(result)}
+    except Exception as e:
+        conn.rollback()
+        return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': str(e)})}
+    finally:
+        cur.close()
+        conn.close()
