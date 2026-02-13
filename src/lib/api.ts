@@ -84,6 +84,8 @@ export const api = {
       request<{ success: boolean; new_balance: number; min_balance: number }>("POST", undefined, { entity: "savings", action: "partial_withdrawal", ...data }),
     modifyTerm: (data: { saving_id: number; new_term: number }) =>
       request<{ success: boolean; new_term: number; new_end_date: string; schedule: SavingsScheduleItem[] }>("POST", undefined, { entity: "savings", action: "modify_term", ...data }),
+    backfillAccrue: (data: { saving_id: number; date_from?: string; date_to?: string }) =>
+      request<{ success: boolean; days_accrued: number; total_amount: number; date_from: string; date_to: string }>("POST", undefined, { entity: "savings", action: "backfill_accrue", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>
@@ -321,6 +323,9 @@ export interface SavingDetail extends Saving {
   transactions: SavingTransaction[];
   total_daily_accrued: number;
   max_payout: number;
+  accrual_first_date: string | null;
+  accrual_last_date: string | null;
+  accrual_days_count: number;
 }
 
 export interface SavingTransaction {

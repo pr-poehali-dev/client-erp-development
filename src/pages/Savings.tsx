@@ -63,6 +63,8 @@ const Savings = () => {
   const [withdrawalForm, setWithdrawalForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
   const [showModifyTerm, setShowModifyTerm] = useState(false);
   const [modifyTermForm, setModifyTermForm] = useState({ new_term: "" });
+  const [showBackfill, setShowBackfill] = useState(false);
+  const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "" });
 
@@ -190,6 +192,25 @@ const Savings = () => {
       const res = await api.savings.modifyTerm({ saving_id: detail.id, new_term: Number(modifyTermForm.new_term) });
       toast({ title: "Срок изменён", description: `Новый срок: ${res.new_term} мес., окончание: ${fmtDate(res.new_end_date)}` });
       setShowModifyTerm(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBackfillAccrue = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.backfillAccrue({
+        saving_id: detail.id,
+        date_from: backfillForm.date_from || undefined,
+        date_to: backfillForm.date_to,
+      });
+      toast({ title: "Начисление выполнено", description: `Начислено за ${res.days_accrued} дней: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(res.total_amount)} ₽` });
+      setShowBackfill(false);
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -477,6 +498,14 @@ const Savings = () => {
                       <div className="flex items-center gap-2"><Icon name="CalendarClock" size={16} /><span className="font-medium text-sm">Изменить срок</span></div>
                       <span className="text-xs text-muted-foreground">Текущий: {detail.term_months} мес. (график пересчитается)</span>
                     </Button>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => { setBackfillForm({ date_from: detail.accrual_last_date ? new Date(new Date(detail.accrual_last_date).getTime() + 86400000).toISOString().slice(0, 10) : detail.start_date, date_to: new Date().toISOString().slice(0, 10) }); setShowBackfill(true); }}>
+                      <div className="flex items-center gap-2"><Icon name="Calculator" size={16} /><span className="font-medium text-sm">Начислить проценты вручную</span></div>
+                      <span className="text-xs text-muted-foreground">
+                        {detail.accrual_days_count > 0
+                          ? `Начислено за ${detail.accrual_days_count} дн. (${fmtDate(detail.accrual_first_date || "")} — ${fmtDate(detail.accrual_last_date || "")})`
+                          : "Начислений ещё не было"}
+                      </span>
+                    </Button>
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => setShowEarlyClose(true)}>
                       <div className="flex items-center gap-2"><Icon name="XCircle" size={16} /><span className="font-medium text-sm">Досрочное закрытие</span></div>
                       <span className="text-xs text-muted-foreground">Закрыть вклад до окончания срока</span>
@@ -660,6 +689,49 @@ const Savings = () => {
               <Button onClick={handleModifyTerm} disabled={saving || !modifyTermForm.new_term} className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
                 Сохранить
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Backfill accrue dialog */}
+      <Dialog open={showBackfill} onOpenChange={setShowBackfill}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Начисление процентов вручную</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50 space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Баланс вклада:</span>
+                  <span className="font-semibold">{fmt(detail.current_balance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Ставка:</span>
+                  <span className="font-medium">{detail.rate}% годовых</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Начислено (факт.):</span>
+                  <span className="font-medium text-green-600">{fmt(detail.total_daily_accrued)}</span>
+                </div>
+                {detail.accrual_days_count > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Период начислений:</span>
+                    <span className="font-medium">{fmtDate(detail.accrual_first_date || "")} — {fmtDate(detail.accrual_last_date || "")}</span>
+                  </div>
+                )}
+              </Card>
+            )}
+            <p className="text-xs text-muted-foreground">Начисление будет выполнено за каждый день в указанном диапазоне на фактический остаток. Дни, за которые уже есть начисление, будут пропущены.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label className="text-xs">Дата с</Label><Input type="date" value={backfillForm.date_from} onChange={e => setBackfillForm(p => ({ ...p, date_from: e.target.value }))} /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Дата по</Label><Input type="date" value={backfillForm.date_to} onChange={e => setBackfillForm(p => ({ ...p, date_to: e.target.value }))} /></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowBackfill(false)}>Отмена</Button>
+              <Button onClick={handleBackfillAccrue} disabled={saving} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Calculator" size={16} />}
+                Начислить
               </Button>
             </div>
           </div>
