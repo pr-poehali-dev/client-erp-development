@@ -70,6 +70,12 @@ export const api = {
     transaction: (data: { saving_id: number; amount: number; transaction_type: string; transaction_date?: string; is_cash?: boolean; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "transaction", ...data }),
     earlyClose: (savingId: number) => request<{ final_amount: number; early_interest: number }>("POST", undefined, { entity: "savings", action: "early_close", saving_id: savingId }),
+    interestPayout: (data: { saving_id: number; amount?: number; transaction_date?: string }) =>
+      request<{ success: boolean; amount: number }>("POST", undefined, { entity: "savings", action: "interest_payout", ...data }),
+    updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
+    deleteTransaction: (transactionId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_transaction", transaction_id: transactionId }),
   },
 
   shares: {
@@ -78,6 +84,10 @@ export const api = {
     create: (data: { member_id: number; amount: number }) => request<{ id: number; account_no: string }>("POST", undefined, { entity: "shares", action: "create", ...data }),
     transaction: (data: { account_id: number; amount: number; transaction_type: string; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "transaction", ...data }),
+    updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "update_transaction", ...data }),
+    deleteTransaction: (transactionId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "delete_transaction", transaction_id: transactionId }),
   },
 
   export: {

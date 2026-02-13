@@ -531,6 +531,85 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True}
 
+        elif action == 'interest_payout':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT payout_type, accrued_interest, paid_interest, current_balance, rate, amount FROM savings WHERE id=%s" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден'}
+            payout_type = sv[0]
+            accrued = Decimal(str(sv[1]))
+            paid = Decimal(str(sv[2]))
+            bal = Decimal(str(sv[3]))
+            s_rate = Decimal(str(sv[4]))
+            s_amount = Decimal(str(sv[5]))
+            td = body.get('transaction_date', date.today().isoformat())
+
+            if payout_type == 'end_of_term':
+                return {'error': 'По данному вкладу проценты выплачиваются в конце срока'}
+
+            pay_date = date.fromisoformat(td)
+            days_in_month = calendar.monthrange(pay_date.year, pay_date.month)[1]
+            interest = (s_amount * s_rate / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            if body.get('amount'):
+                interest = Decimal(str(body['amount']))
+
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_payout','Выплата процентов')" % (sid, td, float(interest)))
+            cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(interest), float(interest), sid))
+            audit_log(cur, staff, 'interest_payout', 'saving', sid, '', 'Выплата %%: %s' % float(interest), ip)
+            conn.commit()
+            return {'success': True, 'amount': float(interest)}
+
+        elif action == 'update_transaction':
+            tid = int(body['transaction_id'])
+            cur.execute("SELECT saving_id, amount, transaction_type FROM savings_transactions WHERE id=%s" % tid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Операция не найдена'}
+            sid, old_amount, old_tt = old[0], Decimal(str(old[1])), old[2]
+
+            new_date = body.get('transaction_date')
+            new_amount = Decimal(str(body.get('amount', float(old_amount))))
+            new_desc = body.get('description', '')
+            delta = new_amount - old_amount
+
+            upd = "amount=%s" % float(new_amount)
+            if new_date:
+                upd += ", transaction_date='%s'" % new_date
+            if new_desc is not None:
+                upd += ", description='%s'" % esc(new_desc)
+            cur.execute("UPDATE savings_transactions SET %s WHERE id=%s" % (upd, tid))
+
+            if delta != 0:
+                if old_tt == 'deposit':
+                    cur.execute("UPDATE savings SET current_balance=current_balance+%s, amount=amount+%s, updated_at=NOW() WHERE id=%s" % (float(delta), float(delta), sid))
+                elif old_tt == 'withdrawal':
+                    cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (float(delta), sid))
+                elif old_tt == 'interest_payout':
+                    cur.execute("UPDATE savings SET paid_interest=paid_interest+%s, accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(delta), float(delta), sid))
+            audit_log(cur, staff, 'update_transaction', 'saving', sid, '', 'Транзакция #%s: %s -> %s' % (tid, float(old_amount), float(new_amount)), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_transaction':
+            tid = int(body['transaction_id'])
+            cur.execute("SELECT saving_id, amount, transaction_type FROM savings_transactions WHERE id=%s" % tid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Операция не найдена'}
+            sid, old_amount, old_tt = old[0], Decimal(str(old[1])), old[2]
+            cur.execute("DELETE FROM savings_transactions WHERE id=%s" % tid)
+            if old_tt == 'deposit':
+                cur.execute("UPDATE savings SET current_balance=current_balance-%s, amount=amount-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), sid))
+            elif old_tt == 'withdrawal':
+                cur.execute("UPDATE savings SET current_balance=current_balance+%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), sid))
+            elif old_tt == 'interest_payout':
+                cur.execute("UPDATE savings SET paid_interest=paid_interest-%s, accrued_interest=accrued_interest-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), sid))
+            audit_log(cur, staff, 'delete_transaction', 'saving', sid, '', 'Удалена: %s %s' % (old_tt, float(old_amount)), ip)
+            conn.commit()
+            return {'success': True}
+
         elif action == 'early_close':
             sid = int(body['saving_id'])
             cur.execute("SELECT amount, accrued_interest, paid_interest, current_balance FROM savings WHERE id=%s" % sid)
@@ -595,6 +674,48 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'%s','%s')" % (aid, td, a, tt, esc(d)))
             tt_label = 'Внесение' if tt == 'in' else 'Выплата'
             audit_log(cur, staff, 'transaction', 'share', aid, '', '%s: %s' % (tt_label, a), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'update_transaction':
+            tid = int(body['transaction_id'])
+            cur.execute("SELECT account_id, amount, transaction_type FROM share_transactions WHERE id=%s" % tid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Операция не найдена'}
+            aid, old_amount, old_tt = old[0], Decimal(str(old[1])), old[2]
+            new_amount = Decimal(str(body.get('amount', float(old_amount))))
+            new_date = body.get('transaction_date')
+            new_desc = body.get('description', '')
+            delta = new_amount - old_amount
+            upd = "amount=%s" % float(new_amount)
+            if new_date:
+                upd += ", transaction_date='%s'" % new_date
+            if new_desc is not None:
+                upd += ", description='%s'" % esc(new_desc)
+            cur.execute("UPDATE share_transactions SET %s WHERE id=%s" % (upd, tid))
+            if delta != 0:
+                if old_tt == 'in':
+                    cur.execute("UPDATE share_accounts SET balance=balance+%s, total_in=total_in+%s, updated_at=NOW() WHERE id=%s" % (float(delta), float(delta), aid))
+                else:
+                    cur.execute("UPDATE share_accounts SET balance=balance-%s, total_out=total_out+%s, updated_at=NOW() WHERE id=%s" % (float(delta), float(delta), aid))
+            audit_log(cur, staff, 'update_transaction', 'share', aid, '', 'Транзакция #%s: %s -> %s' % (tid, float(old_amount), float(new_amount)), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'delete_transaction':
+            tid = int(body['transaction_id'])
+            cur.execute("SELECT account_id, amount, transaction_type FROM share_transactions WHERE id=%s" % tid)
+            old = cur.fetchone()
+            if not old:
+                return {'error': 'Операция не найдена'}
+            aid, old_amount, old_tt = old[0], Decimal(str(old[1])), old[2]
+            cur.execute("DELETE FROM share_transactions WHERE id=%s" % tid)
+            if old_tt == 'in':
+                cur.execute("UPDATE share_accounts SET balance=balance-%s, total_in=total_in-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), aid))
+            else:
+                cur.execute("UPDATE share_accounts SET balance=balance+%s, total_out=total_out-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), aid))
+            audit_log(cur, staff, 'delete_transaction', 'share', aid, '', 'Удалена: %s %s' % (old_tt, float(old_amount)), ip)
             conn.commit()
             return {'success': True}
 
