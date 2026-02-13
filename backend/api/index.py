@@ -4,6 +4,8 @@ import psycopg2
 from datetime import datetime, date
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
+import base64
+from io import BytesIO
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -476,6 +478,563 @@ def handle_shares(method, params, body, cur, conn):
             conn.commit()
             return {'success': True}
 
+def fmt_date(d):
+    if not d:
+        return ''
+    if isinstance(d, str):
+        parts = d.split('-')
+        if len(parts) == 3:
+            return '%s.%s.%s' % (parts[2], parts[1], parts[0])
+        return d
+    return d.strftime('%d.%m.%Y')
+
+def fmt_money(n):
+    if n is None:
+        return '0.00'
+    return '{:,.2f}'.format(float(n)).replace(',', ' ')
+
+def generate_loan_xlsx(loan, schedule, payments, member_name):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Выписка по займу'
+
+    thin = Side(style='thin')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_font = Font(bold=True, size=11)
+    title_font = Font(bold=True, size=14)
+    header_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+
+    ws.merge_cells('A1:F1')
+    ws['A1'] = 'Выписка по договору займа %s' % loan.get('contract_no', '')
+    ws['A1'].font = title_font
+
+    ws['A3'] = 'Пайщик:'
+    ws['B3'] = member_name
+    ws['A3'].font = Font(bold=True)
+    ws['A4'] = 'Сумма займа:'
+    ws['B4'] = '%s руб.' % fmt_money(loan.get('amount'))
+    ws['A4'].font = Font(bold=True)
+    ws['A5'] = 'Ставка:'
+    ws['B5'] = '%s%% годовых' % loan.get('rate', '')
+    ws['A5'].font = Font(bold=True)
+    ws['A6'] = 'Срок:'
+    ws['B6'] = '%s мес.' % loan.get('term_months', '')
+    ws['A6'].font = Font(bold=True)
+    ws['A7'] = 'Период:'
+    ws['B7'] = '%s — %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date')))
+    ws['A7'].font = Font(bold=True)
+    ws['A8'] = 'Остаток:'
+    ws['B8'] = '%s руб.' % fmt_money(loan.get('balance'))
+    ws['A8'].font = Font(bold=True)
+    ws['A9'] = 'Статус:'
+    status_map = {'active': 'Активен', 'closed': 'Закрыт', 'overdue': 'Просрочен'}
+    ws['B9'] = status_map.get(loan.get('status', ''), loan.get('status', ''))
+    ws['A9'].font = Font(bold=True)
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 18
+    ws.column_dimensions['F'].width = 18
+    ws.column_dimensions['G'].width = 14
+
+    row = 11
+    ws.merge_cells('A%d:G%d' % (row, row))
+    ws['A%d' % row] = 'ГРАФИК ПЛАТЕЖЕЙ'
+    ws['A%d' % row].font = Font(bold=True, size=12)
+    row += 1
+
+    sched_headers = ['№', 'Дата', 'Платёж', 'Осн. долг', 'Проценты', 'Остаток', 'Статус']
+    for ci, h in enumerate(sched_headers, 1):
+        c = ws.cell(row=row, column=ci, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.border = border
+        c.alignment = Alignment(horizontal='center')
+    row += 1
+
+    status_labels = {'pending': 'Ожидается', 'paid': 'Оплачен', 'partial': 'Частично', 'overdue': 'Просрочен'}
+    for item in schedule:
+        ws.cell(row=row, column=1, value=item.get('payment_no')).border = border
+        ws.cell(row=row, column=2, value=fmt_date(item.get('payment_date'))).border = border
+        ws.cell(row=row, column=3, value=float(item.get('payment_amount', 0))).border = border
+        ws.cell(row=row, column=3).number_format = '#,##0.00'
+        ws.cell(row=row, column=4, value=float(item.get('principal_amount', 0))).border = border
+        ws.cell(row=row, column=4).number_format = '#,##0.00'
+        ws.cell(row=row, column=5, value=float(item.get('interest_amount', 0))).border = border
+        ws.cell(row=row, column=5).number_format = '#,##0.00'
+        ws.cell(row=row, column=6, value=float(item.get('balance_after', 0))).border = border
+        ws.cell(row=row, column=6).number_format = '#,##0.00'
+        ws.cell(row=row, column=7, value=status_labels.get(item.get('status', 'pending'), item.get('status', ''))).border = border
+        row += 1
+
+    total_payment = sum(float(i.get('payment_amount', 0)) for i in schedule)
+    total_principal = sum(float(i.get('principal_amount', 0)) for i in schedule)
+    total_interest = sum(float(i.get('interest_amount', 0)) for i in schedule)
+    ws.cell(row=row, column=1, value='ИТОГО').font = Font(bold=True)
+    ws.cell(row=row, column=1).border = border
+    ws.cell(row=row, column=2).border = border
+    ws.cell(row=row, column=3, value=total_payment).border = border
+    ws.cell(row=row, column=3).number_format = '#,##0.00'
+    ws.cell(row=row, column=3).font = Font(bold=True)
+    ws.cell(row=row, column=4, value=total_principal).border = border
+    ws.cell(row=row, column=4).number_format = '#,##0.00'
+    ws.cell(row=row, column=5, value=total_interest).border = border
+    ws.cell(row=row, column=5).number_format = '#,##0.00'
+    ws.cell(row=row, column=6).border = border
+    ws.cell(row=row, column=7).border = border
+    row += 2
+
+    if payments:
+        ws.merge_cells('A%d:F%d' % (row, row))
+        ws['A%d' % row] = 'ИСТОРИЯ ПЛАТЕЖЕЙ'
+        ws['A%d' % row].font = Font(bold=True, size=12)
+        row += 1
+
+        pay_headers = ['Дата', 'Сумма', 'Осн. долг', 'Проценты', 'Штрафы', 'Тип']
+        for ci, h in enumerate(pay_headers, 1):
+            c = ws.cell(row=row, column=ci, value=h)
+            c.font = header_font
+            c.fill = header_fill
+            c.border = border
+            c.alignment = Alignment(horizontal='center')
+        row += 1
+
+        for p in payments:
+            ws.cell(row=row, column=1, value=fmt_date(p.get('payment_date'))).border = border
+            ws.cell(row=row, column=2, value=float(p.get('amount', 0))).border = border
+            ws.cell(row=row, column=2).number_format = '#,##0.00'
+            ws.cell(row=row, column=3, value=float(p.get('principal_part', 0))).border = border
+            ws.cell(row=row, column=3).number_format = '#,##0.00'
+            ws.cell(row=row, column=4, value=float(p.get('interest_part', 0))).border = border
+            ws.cell(row=row, column=4).number_format = '#,##0.00'
+            ws.cell(row=row, column=5, value=float(p.get('penalty_part', 0))).border = border
+            ws.cell(row=row, column=5).number_format = '#,##0.00'
+            type_labels = {'regular': 'Обычный', 'early_full': 'Досрочное полное', 'early_partial': 'Досрочное частичное'}
+            ws.cell(row=row, column=6, value=type_labels.get(p.get('payment_type', ''), p.get('payment_type', ''))).border = border
+            row += 1
+
+    row += 1
+    ws['A%d' % row] = 'Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M')
+    ws['A%d' % row].font = Font(italic=True, color='666666')
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def generate_loan_pdf(loan, schedule, payments, member_name):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=14, spaceAfter=6)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, spaceAfter=2)
+
+    story.append(Paragraph('Vyipiska po dogovoru zayma %s' % loan.get('contract_no', ''), title_style))
+
+    status_map = {'active': 'Aktiven', 'closed': 'Zakryt', 'overdue': 'Prosrochen'}
+    info_data = [
+        ['Payschik:', member_name, 'Summa:', '%s rub.' % fmt_money(loan.get('amount'))],
+        ['Stavka:', '%s%%' % loan.get('rate', ''), 'Srok:', '%s mes.' % loan.get('term_months', '')],
+        ['Period:', '%s - %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date'))), 'Ostatok:', '%s rub.' % fmt_money(loan.get('balance'))],
+        ['Status:', status_map.get(loan.get('status', ''), loan.get('status', '')), '', ''],
+    ]
+    info_table = Table(info_data, colWidths=[70, 180, 70, 180])
+    info_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph('Grafik platezhey', ParagraphStyle('SH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
+
+    sched_data = [['N', 'Data', 'Platezh', 'Osn. dolg', 'Protsenty', 'Ostatok', 'Status']]
+    status_labels = {'pending': 'Ozhidaetsya', 'paid': 'Oplatchen', 'partial': 'Chastichno', 'overdue': 'Prosrochen'}
+    for item in schedule:
+        sched_data.append([
+            str(item.get('payment_no', '')),
+            fmt_date(item.get('payment_date')),
+            fmt_money(item.get('payment_amount', 0)),
+            fmt_money(item.get('principal_amount', 0)),
+            fmt_money(item.get('interest_amount', 0)),
+            fmt_money(item.get('balance_after', 0)),
+            status_labels.get(item.get('status', 'pending'), item.get('status', '')),
+        ])
+    total_payment = sum(float(i.get('payment_amount', 0)) for i in schedule)
+    total_principal = sum(float(i.get('principal_amount', 0)) for i in schedule)
+    total_interest = sum(float(i.get('interest_amount', 0)) for i in schedule)
+    sched_data.append(['ITOGO', '', fmt_money(total_payment), fmt_money(total_principal), fmt_money(total_interest), '', ''])
+
+    st = Table(sched_data, colWidths=[30, 70, 85, 85, 85, 85, 75])
+    st.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2EFDA')),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ALIGN', (2, 0), (5, -1), 'RIGHT'),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F2F2F2')),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(st)
+    story.append(Spacer(1, 10))
+
+    if payments:
+        story.append(Paragraph('Istoriya platezhey', ParagraphStyle('PH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
+        pay_data = [['Data', 'Summa', 'Osn. dolg', 'Protsenty', 'Shtrafy', 'Tip']]
+        type_labels = {'regular': 'Obychnyy', 'early_full': 'Dosrochnoe polnoe', 'early_partial': 'Dosrochnoe chastichnoe'}
+        for p in payments:
+            pay_data.append([
+                fmt_date(p.get('payment_date')),
+                fmt_money(p.get('amount', 0)),
+                fmt_money(p.get('principal_part', 0)),
+                fmt_money(p.get('interest_part', 0)),
+                fmt_money(p.get('penalty_part', 0)),
+                type_labels.get(p.get('payment_type', ''), p.get('payment_type', '')),
+            ])
+        pt = Table(pay_data, colWidths=[70, 85, 85, 85, 85, 120])
+        pt.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2EFDA')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ALIGN', (1, 0), (4, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(pt)
+
+    story.append(Spacer(1, 15))
+    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+
+    doc.build(story)
+    return buf.getvalue()
+
+def generate_savings_xlsx(saving, schedule, transactions, member_name):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Выписка по сбережению'
+
+    thin = Side(style='thin')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color='D6EAF8', end_color='D6EAF8', fill_type='solid')
+
+    ws.merge_cells('A1:F1')
+    ws['A1'] = 'Выписка по договору сбережений %s' % saving.get('contract_no', '')
+    ws['A1'].font = Font(bold=True, size=14)
+
+    ws['A3'] = 'Пайщик:'
+    ws['B3'] = member_name
+    ws['A3'].font = Font(bold=True)
+    ws['A4'] = 'Сумма вклада:'
+    ws['B4'] = '%s руб.' % fmt_money(saving.get('amount'))
+    ws['A4'].font = Font(bold=True)
+    ws['A5'] = 'Ставка:'
+    ws['B5'] = '%s%% годовых' % saving.get('rate', '')
+    ws['A5'].font = Font(bold=True)
+    ws['A6'] = 'Срок:'
+    ws['B6'] = '%s мес.' % saving.get('term_months', '')
+    ws['A6'].font = Font(bold=True)
+    ws['A7'] = 'Период:'
+    ws['B7'] = '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date')))
+    ws['A7'].font = Font(bold=True)
+    ws['A8'] = 'Начислено %:'
+    ws['B8'] = '%s руб.' % fmt_money(saving.get('accrued_interest'))
+    ws['A8'].font = Font(bold=True)
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 18
+
+    row = 10
+    ws['A%d' % row] = 'ГРАФИК ДОХОДНОСТИ'
+    ws['A%d' % row].font = Font(bold=True, size=12)
+    row += 1
+
+    headers = ['№', 'Начало', 'Окончание', 'Проценты', 'Накоплено', 'Баланс']
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=row, column=ci, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.border = border
+        c.alignment = Alignment(horizontal='center')
+    row += 1
+
+    for item in schedule:
+        ws.cell(row=row, column=1, value=item.get('period_no')).border = border
+        ws.cell(row=row, column=2, value=fmt_date(item.get('period_start'))).border = border
+        ws.cell(row=row, column=3, value=fmt_date(item.get('period_end'))).border = border
+        ws.cell(row=row, column=4, value=float(item.get('interest_amount', 0))).border = border
+        ws.cell(row=row, column=4).number_format = '#,##0.00'
+        ws.cell(row=row, column=5, value=float(item.get('cumulative_interest', 0))).border = border
+        ws.cell(row=row, column=5).number_format = '#,##0.00'
+        ws.cell(row=row, column=6, value=float(item.get('balance_after', 0))).border = border
+        ws.cell(row=row, column=6).number_format = '#,##0.00'
+        row += 1
+
+    if transactions:
+        row += 1
+        ws['A%d' % row] = 'ОПЕРАЦИИ'
+        ws['A%d' % row].font = Font(bold=True, size=12)
+        row += 1
+        t_headers = ['Дата', 'Сумма', 'Тип', 'Описание']
+        for ci, h in enumerate(t_headers, 1):
+            c = ws.cell(row=row, column=ci, value=h)
+            c.font = header_font
+            c.fill = header_fill
+            c.border = border
+        row += 1
+        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %', 'early_close': 'Досрочное закрытие'}
+        for t in transactions:
+            ws.cell(row=row, column=1, value=fmt_date(t.get('transaction_date'))).border = border
+            ws.cell(row=row, column=2, value=float(t.get('amount', 0))).border = border
+            ws.cell(row=row, column=2).number_format = '#,##0.00'
+            ws.cell(row=row, column=3, value=type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', ''))).border = border
+            ws.cell(row=row, column=4, value=t.get('description', '')).border = border
+            row += 1
+
+    row += 1
+    ws['A%d' % row] = 'Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M')
+    ws['A%d' % row].font = Font(italic=True, color='666666')
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def generate_savings_pdf(saving, schedule, transactions, member_name):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph('Vyipiska po dogovoru sberezheniy %s' % saving.get('contract_no', ''), ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, spaceAfter=6)))
+
+    info = [
+        ['Payschik:', member_name, 'Summa:', '%s rub.' % fmt_money(saving.get('amount'))],
+        ['Stavka:', '%s%%' % saving.get('rate', ''), 'Srok:', '%s mes.' % saving.get('term_months', '')],
+        ['Period:', '%s - %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Nachisleno:', '%s rub.' % fmt_money(saving.get('accrued_interest'))],
+    ]
+    it = Table(info, colWidths=[70, 180, 70, 180])
+    it.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9), ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'), ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    story.append(it)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph('Grafik dokhodnosti', ParagraphStyle('SH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
+    sdata = [['N', 'Nachalo', 'Okonchanie', 'Protsenty', 'Nakopleno', 'Balans']]
+    for item in schedule:
+        sdata.append([str(item.get('period_no', '')), fmt_date(item.get('period_start')), fmt_date(item.get('period_end')), fmt_money(item.get('interest_amount', 0)), fmt_money(item.get('cumulative_interest', 0)), fmt_money(item.get('balance_after', 0))])
+    st = Table(sdata, colWidths=[30, 80, 80, 85, 85, 85])
+    st.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D6EAF8')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (3, 0), (-1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    story.append(st)
+
+    if transactions:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph('Operatsii', ParagraphStyle('TH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
+        tdata = [['Data', 'Summa', 'Tip', 'Opisanie']]
+        type_labels = {'deposit': 'Popolnenie', 'withdrawal': 'Snyatie', 'interest_payout': 'Vyplata %', 'early_close': 'Dosrochnoe zakrytie'}
+        for t in transactions:
+            tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)), type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
+        tt = Table(tdata, colWidths=[70, 85, 120, 200])
+        tt.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D6EAF8')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+        story.append(tt)
+
+    story.append(Spacer(1, 15))
+    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('F', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    doc.build(story)
+    return buf.getvalue()
+
+def generate_shares_xlsx(account, transactions, member_name):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Выписка по паевому счёту'
+
+    thin = Side(style='thin')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
+
+    ws.merge_cells('A1:D1')
+    ws['A1'] = 'Выписка по паевому счёту %s' % account.get('account_no', '')
+    ws['A1'].font = Font(bold=True, size=14)
+
+    ws['A3'] = 'Пайщик:'
+    ws['B3'] = member_name
+    ws['A3'].font = Font(bold=True)
+    ws['A4'] = 'Баланс:'
+    ws['B4'] = '%s руб.' % fmt_money(account.get('balance'))
+    ws['A4'].font = Font(bold=True)
+    ws['A5'] = 'Внесено:'
+    ws['B5'] = '%s руб.' % fmt_money(account.get('total_in'))
+    ws['A5'].font = Font(bold=True)
+    ws['A6'] = 'Выплачено:'
+    ws['B6'] = '%s руб.' % fmt_money(account.get('total_out'))
+    ws['A6'].font = Font(bold=True)
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 30
+
+    row = 8
+    ws['A%d' % row] = 'ОПЕРАЦИИ'
+    ws['A%d' % row].font = Font(bold=True, size=12)
+    row += 1
+
+    headers = ['Дата', 'Сумма', 'Тип', 'Описание']
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=row, column=ci, value=h)
+        c.font = header_font
+        c.fill = header_fill
+        c.border = border
+    row += 1
+
+    type_labels = {'in': 'Внесение', 'out': 'Выплата'}
+    for t in transactions:
+        ws.cell(row=row, column=1, value=fmt_date(t.get('transaction_date'))).border = border
+        ws.cell(row=row, column=2, value=float(t.get('amount', 0))).border = border
+        ws.cell(row=row, column=2).number_format = '#,##0.00'
+        ws.cell(row=row, column=3, value=type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', ''))).border = border
+        ws.cell(row=row, column=4, value=t.get('description', '')).border = border
+        row += 1
+
+    row += 1
+    ws['A%d' % row] = 'Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M')
+    ws['A%d' % row].font = Font(italic=True, color='666666')
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def generate_shares_pdf(account, transactions, member_name):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph('Vyipiska po paevomu schyotu %s' % account.get('account_no', ''), ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, spaceAfter=6)))
+    info = [['Payschik:', member_name], ['Balans:', '%s rub.' % fmt_money(account.get('balance'))], ['Vneseno:', '%s rub.' % fmt_money(account.get('total_in'))], ['Vyplacheno:', '%s rub.' % fmt_money(account.get('total_out'))]]
+    it = Table(info, colWidths=[80, 200])
+    it.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9), ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    story.append(it)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph('Operatsii', ParagraphStyle('OH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
+    tdata = [['Data', 'Summa', 'Tip', 'Opisanie']]
+    type_labels = {'in': 'Vnesenie', 'out': 'Vyplata'}
+    for t in transactions:
+        tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)), type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
+    tt = Table(tdata, colWidths=[70, 85, 100, 200])
+    tt.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FCE4D6')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    story.append(tt)
+
+    story.append(Spacer(1, 15))
+    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('F', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    doc.build(story)
+    return buf.getvalue()
+
+def handle_export(params, cur):
+    export_type = params.get('type', 'loan')
+    format_ = params.get('format', 'xlsx')
+    item_id = params.get('id')
+    if not item_id:
+        return None
+
+    if export_type == 'loan':
+        loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
+        if not loan:
+            return None
+        cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
+        nr = cur.fetchone()
+        member_name = nr[0] if nr else ''
+        schedule = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % item_id)
+        payments = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % item_id)
+        if format_ == 'pdf':
+            data = generate_loan_pdf(loan, schedule, payments, member_name)
+            ct = 'application/pdf'
+            fn = 'loan_%s.pdf' % loan.get('contract_no', item_id)
+        else:
+            data = generate_loan_xlsx(loan, schedule, payments, member_name)
+            ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            fn = 'loan_%s.xlsx' % loan.get('contract_no', item_id)
+
+    elif export_type == 'saving':
+        saving = query_one(cur, "SELECT * FROM savings WHERE id = %s" % item_id)
+        if not saving:
+            return None
+        cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % saving['member_id'])
+        nr = cur.fetchone()
+        member_name = nr[0] if nr else ''
+        schedule = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % item_id)
+        transactions = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % item_id)
+        if format_ == 'pdf':
+            data = generate_savings_pdf(saving, schedule, transactions, member_name)
+            ct = 'application/pdf'
+            fn = 'saving_%s.pdf' % saving.get('contract_no', item_id)
+        else:
+            data = generate_savings_xlsx(saving, schedule, transactions, member_name)
+            ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            fn = 'saving_%s.xlsx' % saving.get('contract_no', item_id)
+
+    elif export_type == 'share':
+        account = query_one(cur, "SELECT * FROM share_accounts WHERE id = %s" % item_id)
+        if not account:
+            return None
+        cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % account['member_id'])
+        nr = cur.fetchone()
+        member_name = nr[0] if nr else ''
+        transactions = query_rows(cur, "SELECT * FROM share_transactions WHERE account_id=%s ORDER BY transaction_date DESC" % item_id)
+        if format_ == 'pdf':
+            data = generate_shares_pdf(account, transactions, member_name)
+            ct = 'application/pdf'
+            fn = 'share_%s.pdf' % account.get('account_no', item_id)
+        else:
+            data = generate_shares_xlsx(account, transactions, member_name)
+            ct = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            fn = 'share_%s.xlsx' % account.get('account_no', item_id)
+    else:
+        return None
+
+    return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
+
 def handle_dashboard(cur):
     stats = {}
     cur.execute("SELECT COUNT(*) FROM members WHERE status='active'")
@@ -518,6 +1077,8 @@ def handler(event, context):
             result = handle_savings(method, params, body, cur, conn)
         elif entity == 'shares':
             result = handle_shares(method, params, body, cur, conn)
+        elif entity == 'export':
+            result = handle_export(params, cur)
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 

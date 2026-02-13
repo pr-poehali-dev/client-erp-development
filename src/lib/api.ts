@@ -70,6 +70,24 @@ export const api = {
     transaction: (data: { account_id: number; amount: number; transaction_type: string; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "transaction", ...data }),
   },
+
+  export: {
+    download: async (type: "loan" | "saving" | "share", id: number, format: "xlsx" | "pdf") => {
+      const res = await request<ExportResult>("GET", { entity: "export", type, id, format });
+      const binary = atob(res.file);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: res.content_type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+  },
 };
 
 export interface DashboardStats {
@@ -264,6 +282,12 @@ export interface ShareTransaction {
   amount: number;
   transaction_type: string;
   description: string;
+}
+
+export interface ExportResult {
+  file: string;
+  content_type: string;
+  filename: string;
 }
 
 export default api;

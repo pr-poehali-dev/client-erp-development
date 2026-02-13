@@ -26,6 +26,12 @@ const columns: Column<Saving>[] = [
   { key: "payout_type", label: "Выплата", render: (i: Saving) => <span className="text-xs">{i.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</span> },
   { key: "end_date", label: "Окончание", render: (i: Saving) => fmtDate(i.end_date) },
   { key: "status", label: "Статус", render: (i: Saving) => <Badge variant={i.status === "active" ? "default" : "secondary"} className="text-xs">{i.status === "active" ? "Активен" : "Закрыт"}</Badge> },
+  { key: "id", label: "", render: (i: Saving) => (
+    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+      <button className="p-1 rounded hover:bg-muted" title="Excel" onClick={() => api.export.download("saving", i.id, "xlsx")}><Icon name="FileSpreadsheet" size={14} className="text-green-600" /></button>
+      <button className="p-1 rounded hover:bg-muted" title="PDF" onClick={() => api.export.download("saving", i.id, "pdf")}><Icon name="FileText" size={14} className="text-red-500" /></button>
+    </div>
+  )},
 ];
 
 const Savings = () => {

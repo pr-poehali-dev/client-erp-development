@@ -34,6 +34,12 @@ const columns: Column<Loan>[] = [
   { key: "balance", label: "Остаток", render: (i: Loan) => fmt(i.balance) },
   { key: "schedule_type", label: "График", render: (i: Loan) => <span className="text-xs">{i.schedule_type === "annuity" ? "Аннуитет" : "В конце срока"}</span> },
   { key: "status", label: "Статус", render: (i: Loan) => <Badge variant={statusVariant(i.status) as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[i.status] || i.status}</Badge> },
+  { key: "id", label: "", render: (i: Loan) => (
+    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+      <button className="p-1 rounded hover:bg-muted" title="Excel" onClick={() => api.export.download("loan", i.id, "xlsx")}><Icon name="FileSpreadsheet" size={14} className="text-green-600" /></button>
+      <button className="p-1 rounded hover:bg-muted" title="PDF" onClick={() => api.export.download("loan", i.id, "pdf")}><Icon name="FileText" size={14} className="text-red-500" /></button>
+    </div>
+  )},
 ];
 
 const Loans = () => {
@@ -369,10 +375,16 @@ const Loans = () => {
                       <div className="flex items-center gap-2"><Icon name="Settings2" size={16} /><span className="font-medium text-sm">Изменить параметры</span></div>
                       <span className="text-xs text-muted-foreground">Срок, ставка, перерасчёт графика</span>
                     </Button>
-                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-2"><Icon name="FileText" size={16} /><span className="font-medium text-sm">Выписка по счёту</span></div>
-                      <span className="text-xs text-muted-foreground">Экспорт в .xlsx и .pdf</span>
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" onClick={() => { api.export.download("loan", detail.id, "xlsx"); toast({ title: "Формируется Excel-выписка..." }); }}>
+                        <div className="flex items-center gap-2"><Icon name="FileSpreadsheet" size={16} /><span className="font-medium text-sm">Выписка Excel</span></div>
+                        <span className="text-xs text-muted-foreground">Скачать .xlsx с графиком и платежами</span>
+                      </Button>
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" onClick={() => { api.export.download("loan", detail.id, "pdf"); toast({ title: "Формируется PDF-выписка..." }); }}>
+                        <div className="flex items-center gap-2"><Icon name="FileText" size={16} /><span className="font-medium text-sm">Выписка PDF</span></div>
+                        <span className="text-xs text-muted-foreground">Скачать .pdf для печати</span>
+                      </Button>
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>

@@ -22,6 +22,12 @@ const columns: Column<ShareAccount>[] = [
   { key: "total_in", label: "Всего внесено", render: (i: ShareAccount) => fmt(i.total_in) },
   { key: "total_out", label: "Всего выплачено", render: (i: ShareAccount) => fmt(i.total_out) },
   { key: "status", label: "Статус", render: (i: ShareAccount) => <Badge variant="default" className="text-xs">{i.status === "active" ? "Активен" : i.status}</Badge> },
+  { key: "id", label: "", render: (i: ShareAccount) => (
+    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+      <button className="p-1 rounded hover:bg-muted" title="Excel" onClick={() => api.export.download("share", i.id, "xlsx")}><Icon name="FileSpreadsheet" size={14} className="text-green-600" /></button>
+      <button className="p-1 rounded hover:bg-muted" title="PDF" onClick={() => api.export.download("share", i.id, "pdf")}><Icon name="FileText" size={14} className="text-red-500" /></button>
+    </div>
+  )},
 ];
 
 const Shares = () => {
