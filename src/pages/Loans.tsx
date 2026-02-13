@@ -111,8 +111,17 @@ const Loans = () => {
     if (!detail || !payForm.amount) return;
     setSaving(true);
     try {
-      await api.loans.payment({ loan_id: detail.id, payment_date: payForm.date, amount: Number(payForm.amount) });
-      toast({ title: "Платёж внесён" });
+      const res = await api.loans.payment({ loan_id: detail.id, payment_date: payForm.date, amount: Number(payForm.amount) });
+      const parts = [`Осн. долг: ${fmt(res.principal_part)}`, `Проценты: ${fmt(res.interest_part)}`];
+      if (res.penalty_part > 0) parts.push(`Штрафы: ${fmt(res.penalty_part)}`);
+      let title = "Платёж внесён";
+      if (res.new_balance === 0) {
+        title = "Займ полностью погашен";
+      } else if (res.schedule_recalculated) {
+        title = "Платёж внесён, график пересчитан";
+        parts.push(`Новый платёж: ${fmt(res.new_monthly || 0)}`);
+      }
+      toast({ title, description: parts.join(" · ") });
       setShowPayment(false);
       const d = await api.loans.get(detail.id);
       setDetail(d);

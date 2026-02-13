@@ -222,6 +222,8 @@ export interface PaymentResult {
   principal_part: number;
   interest_part: number;
   penalty_part: number;
+  schedule_recalculated?: boolean;
+  new_monthly?: number;
 }
 
 export interface Saving {

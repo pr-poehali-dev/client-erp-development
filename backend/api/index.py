@@ -316,8 +316,37 @@ def handle_loans(method, params, body, cur, conn):
             cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), lid))
             if nb == 0:
                 cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % lid)
+
+            recalc_schedule = None
+            if nb > 0 and pp > ip + pnp:
+                scheduled_principal = sum(
+                    float(sr[1]) - float(sr[4]) for sr in schedule_rows
+                    if Decimal(str(sr[1])) + Decimal(str(sr[2])) + Decimal(str(sr[3])) - Decimal(str(sr[4])) > 0
+                )
+                if pp > Decimal(str(scheduled_principal)) * Decimal('0.01'):
+                    cur.execute("SELECT rate, schedule_type FROM loans WHERE id=%s" % lid)
+                    lr = cur.fetchone()
+                    l_rate, l_stype = float(lr[0]), lr[1]
+
+                    cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='pending'" % lid)
+                    remaining_periods = cur.fetchone()[0]
+
+                    if remaining_periods > 0:
+                        cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status='pending'" % lid)
+                        fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
+                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_periods, date.fromisoformat(pd))
+                        for item in new_sched:
+                            cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+                        ne = date.fromisoformat(new_sched[-1]['payment_date'])
+                        cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_monthly, ne.isoformat(), lid))
+                        recalc_schedule = new_sched
+
             conn.commit()
-            return {'success': True, 'new_balance': float(nb), 'principal_part': float(pp), 'interest_part': float(ip), 'penalty_part': float(pnp)}
+            result = {'success': True, 'new_balance': float(nb), 'principal_part': float(pp), 'interest_part': float(ip), 'penalty_part': float(pnp)}
+            if recalc_schedule:
+                result['schedule_recalculated'] = True
+                result['new_monthly'] = new_monthly
+            return result
 
         elif action == 'early_repayment':
             lid = int(body['loan_id'])
