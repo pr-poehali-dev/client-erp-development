@@ -1,10 +1,12 @@
 import json
 import os
 import psycopg2
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import calendar
 import base64
+import hashlib
+import secrets
 from io import BytesIO
 
 def get_conn():
@@ -1051,10 +1053,236 @@ def handle_dashboard(cur):
     stats['total_shares'] = float(cur.fetchone()[0])
     return stats
 
+def hash_password(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def generate_sms_code():
+    return '%06d' % (secrets.randbelow(900000) + 100000)
+
+def generate_token():
+    return secrets.token_hex(32)
+
+def get_session_user(headers, cur):
+    token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
+    if not token:
+        return None
+    cur.execute("SELECT cs.user_id, u.member_id, u.name, u.phone, u.role FROM client_sessions cs JOIN users u ON u.id=cs.user_id WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {'user_id': row[0], 'member_id': row[1], 'name': row[2], 'phone': row[3], 'role': row[4]}
+
+def handle_auth(method, body, cur, conn):
+    action = body.get('action', '')
+
+    if action == 'send_sms':
+        phone = body.get('phone', '').strip()
+        if not phone:
+            return {'error': 'Укажите номер телефона'}
+        clean_phone = ''.join(c for c in phone if c.isdigit())
+        if len(clean_phone) == 11 and clean_phone[0] == '8':
+            clean_phone = '7' + clean_phone[1:]
+
+        cur.execute("SELECT m.id, m.phone FROM members m WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND m.status='active'" % clean_phone[-10:])
+        member = cur.fetchone()
+        if not member:
+            return {'error': 'Пайщик с таким номером не найден. Обратитесь в КПК.'}
+
+        member_id = member[0]
+        cur.execute("SELECT id, password_hash FROM users WHERE member_id=%s AND role='client'" % member_id)
+        user_row = cur.fetchone()
+
+        code = generate_sms_code()
+        expires = (datetime.now() + timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
+
+        if user_row:
+            user_id = user_row[0]
+            has_password = bool(user_row[1])
+            cur.execute("UPDATE users SET sms_code='%s', sms_code_expires='%s' WHERE id=%s" % (code, expires, user_id))
+        else:
+            cur.execute("SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name) ELSE company_name END FROM members WHERE id=%s" % member_id)
+            name_row = cur.fetchone()
+            uname = name_row[0] if name_row else 'Клиент'
+            cur.execute("INSERT INTO users (member_id, name, email, phone, role, sms_code, sms_code_expires) VALUES (%s,'%s','','%s','client','%s','%s') RETURNING id" % (member_id, esc(uname), esc(phone), code, expires))
+            user_id = cur.fetchone()[0]
+            has_password = False
+
+        conn.commit()
+        return {'success': True, 'has_password': has_password, 'sms_sent': True, 'debug_code': code}
+
+    elif action == 'verify_sms':
+        phone = body.get('phone', '').strip()
+        code = body.get('code', '').strip()
+        clean_phone = ''.join(c for c in phone if c.isdigit())
+
+        cur.execute("SELECT u.id, u.password_hash, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.sms_code='%s' AND u.sms_code_expires > NOW()" % (clean_phone[-10:], esc(code)))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Неверный код или код истёк'}
+
+        user_id, pw_hash, name, member_id = row[0], row[1], row[2], row[3]
+        has_password = bool(pw_hash)
+
+        cur.execute("UPDATE users SET sms_code=NULL, sms_code_expires=NULL WHERE id=%s" % user_id)
+
+        if has_password:
+            token = generate_token()
+            expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+            cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
+            cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+            conn.commit()
+            return {'success': True, 'has_password': True, 'authenticated': True, 'token': token, 'user': {'name': name, 'member_id': member_id}}
+        else:
+            temp_token = generate_token()
+            expires = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+            cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, temp_token, expires))
+            conn.commit()
+            return {'success': True, 'has_password': False, 'setup_token': temp_token}
+
+    elif action == 'set_password':
+        token = body.get('setup_token') or body.get('token', '')
+        password = body.get('password', '')
+        if not password or len(password) < 6:
+            return {'error': 'Пароль должен быть не менее 6 символов'}
+
+        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Сессия истекла, повторите авторизацию'}
+
+        user_id = row[0]
+        pw_hash = hash_password(password)
+        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (pw_hash, user_id))
+
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+
+        new_token = generate_token()
+        expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, new_token, expires))
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+
+        cur.execute("SELECT name, member_id FROM users WHERE id=%s" % user_id)
+        ur = cur.fetchone()
+        conn.commit()
+        return {'success': True, 'token': new_token, 'user': {'name': ur[0], 'member_id': ur[1]}}
+
+    elif action == 'login_password':
+        phone = body.get('phone', '').strip()
+        password = body.get('password', '')
+        clean_phone = ''.join(c for c in phone if c.isdigit())
+        pw_hash = hash_password(password)
+
+        cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_phone[-10:], pw_hash))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Неверный телефон или пароль'}
+
+        user_id, name, member_id = row
+        token = generate_token()
+        expires = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        conn.commit()
+        return {'success': True, 'token': token, 'user': {'name': name, 'member_id': member_id}}
+
+    elif action == 'change_password':
+        token = body.get('token', '')
+        old_pw = body.get('old_password', '')
+        new_pw = body.get('new_password', '')
+        if not new_pw or len(new_pw) < 6:
+            return {'error': 'Новый пароль должен быть не менее 6 символов'}
+
+        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Сессия истекла'}
+        user_id = row[0]
+
+        cur.execute("SELECT password_hash FROM users WHERE id=%s" % user_id)
+        cur_hash = cur.fetchone()[0]
+        if cur_hash and cur_hash != hash_password(old_pw):
+            return {'error': 'Неверный текущий пароль'}
+
+        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (hash_password(new_pw), user_id))
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'logout':
+        token = body.get('token', '')
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+        conn.commit()
+        return {'success': True}
+
+    elif action == 'check':
+        token = body.get('token', '')
+        cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Не авторизован'}
+        return {'success': True, 'user': {'name': row[1], 'member_id': row[2]}}
+
+    return {'error': 'Неизвестное действие'}
+
+def handle_cabinet(method, params, body, headers, cur):
+    token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
+    if not token:
+        token = params.get('token') or body.get('token', '')
+
+    cur.execute("SELECT u.id, u.member_id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+    row = cur.fetchone()
+    if not row:
+        return {'_status': 401, 'error': 'Не авторизован'}
+    member_id = row[1]
+
+    action = params.get('action') or body.get('action', 'overview')
+
+    if action == 'overview':
+        cur.execute("SELECT CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',middle_name) ELSE company_name END as name, member_no, phone, email FROM members WHERE id=%s" % member_id)
+        mr = cur.fetchone()
+        info = {'name': mr[0], 'member_no': mr[1], 'phone': mr[2], 'email': mr[3]} if mr else {}
+
+        loans = query_rows(cur, """
+            SELECT id, contract_no, amount, rate, term_months, schedule_type, start_date, end_date,
+                   monthly_payment, balance, status
+            FROM loans WHERE member_id=%s ORDER BY created_at DESC
+        """ % member_id)
+
+        savings = query_rows(cur, """
+            SELECT id, contract_no, amount, rate, term_months, payout_type, start_date, end_date,
+                   accrued_interest, paid_interest, current_balance, status
+            FROM savings WHERE member_id=%s ORDER BY created_at DESC
+        """ % member_id)
+
+        shares = query_rows(cur, """
+            SELECT id, account_no, balance, total_in, total_out, status
+            FROM share_accounts WHERE member_id=%s ORDER BY created_at DESC
+        """ % member_id)
+
+        return {'info': info, 'loans': loans, 'savings': savings, 'shares': shares}
+
+    elif action == 'loan_detail':
+        loan_id = params.get('id') or body.get('id')
+        loan = query_one(cur, "SELECT * FROM loans WHERE id=%s AND member_id=%s" % (loan_id, member_id))
+        if not loan:
+            return {'error': 'Договор не найден'}
+        loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % loan_id)
+        loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % loan_id)
+        return loan
+
+    elif action == 'saving_detail':
+        saving_id = params.get('id') or body.get('id')
+        saving = query_one(cur, "SELECT * FROM savings WHERE id=%s AND member_id=%s" % (saving_id, member_id))
+        if not saving:
+            return {'error': 'Договор не найден'}
+        saving['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % saving_id)
+        return saving
+
+    return {'error': 'Неизвестное действие'}
+
 def handler(event, context):
-    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета"""
+    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, личный кабинет"""
     if event.get('httpMethod') == 'OPTIONS':
-        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400'}, 'body': ''}
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
     headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
     method = event.get('httpMethod', 'GET')
@@ -1079,6 +1307,14 @@ def handler(event, context):
             result = handle_shares(method, params, body, cur, conn)
         elif entity == 'export':
             result = handle_export(params, cur)
+        elif entity == 'auth':
+            result = handle_auth(method, body, cur, conn)
+        elif entity == 'cabinet':
+            ev_headers = event.get('headers') or {}
+            result = handle_cabinet(method, params, body, ev_headers, cur)
+            if isinstance(result, dict) and '_status' in result:
+                st = result.pop('_status')
+                return {'statusCode': st, 'headers': headers, 'body': json.dumps(result)}
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
 

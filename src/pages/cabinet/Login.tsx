@@ -1,0 +1,252 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import Icon from "@/components/ui/icon";
+import { useToast } from "@/hooks/use-toast";
+import api from "@/lib/api";
+
+type Step = "phone" | "sms" | "password_login" | "set_password";
+
+const Login = () => {
+  const [step, setStep] = useState<Step>("phone");
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [hasPassword, setHasPassword] = useState(false);
+  const [setupToken, setSetupToken] = useState("");
+  const [debugCode, setDebugCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const saveAuth = (token: string, user: { name: string; member_id: number }) => {
+    localStorage.setItem("cabinet_token", token);
+    localStorage.setItem("cabinet_user", JSON.stringify(user));
+    navigate("/cabinet");
+  };
+
+  const handleSendSms = async () => {
+    if (!phone.trim()) return;
+    setLoading(true);
+    try {
+      const res = await api.auth.sendSms(phone);
+      if (res.error) {
+        toast({ title: res.error, variant: "destructive" });
+        return;
+      }
+      setHasPassword(res.has_password);
+      if (res.debug_code) setDebugCode(res.debug_code);
+      setStep("sms");
+      toast({ title: "SMS-код отправлен" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySms = async () => {
+    if (!code.trim()) return;
+    setLoading(true);
+    try {
+      const res = await api.auth.verifySms(phone, code);
+      if (res.error) {
+        toast({ title: res.error, variant: "destructive" });
+        return;
+      }
+      if (res.authenticated && res.token && res.user) {
+        saveAuth(res.token, res.user);
+      } else if (!res.has_password && res.setup_token) {
+        setSetupToken(res.setup_token);
+        setStep("set_password");
+      }
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (password.length < 6) {
+      toast({ title: "Пароль должен быть не менее 6 символов", variant: "destructive" });
+      return;
+    }
+    if (password !== confirmPassword) {
+      toast({ title: "Пароли не совпадают", variant: "destructive" });
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.auth.setPassword(setupToken, password);
+      if (res.error) {
+        toast({ title: res.error, variant: "destructive" });
+        return;
+      }
+      if (res.token && res.user) saveAuth(res.token, res.user);
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordLogin = async () => {
+    if (!password) return;
+    setLoading(true);
+    try {
+      const res = await api.auth.loginPassword(phone, password);
+      if (res.error) {
+        toast({ title: res.error, variant: "destructive" });
+        return;
+      }
+      if (res.token && res.user) saveAuth(res.token, res.user);
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
+            <Icon name="Shield" size={32} className="text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Личный кабинет</h1>
+          <p className="text-muted-foreground text-sm mt-1">Кредитный потребительский кооператив</p>
+        </div>
+
+        <Card className="shadow-lg">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">
+              {step === "phone" && "Вход в кабинет"}
+              {step === "sms" && "Подтверждение"}
+              {step === "password_login" && "Введите пароль"}
+              {step === "set_password" && "Создайте пароль"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {step === "phone" && (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Номер телефона</Label>
+                  <Input
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="+7 (___) ___-__-__"
+                    onKeyDown={e => e.key === "Enter" && handleSendSms()}
+                  />
+                  <p className="text-xs text-muted-foreground">Укажите номер, который зарегистрирован в кооперативе</p>
+                </div>
+                <Button className="w-full gap-2" onClick={handleSendSms} disabled={loading || !phone.trim()}>
+                  {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Send" size={16} />}
+                  Получить SMS-код
+                </Button>
+              </div>
+            )}
+
+            {step === "sms" && (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">SMS-код</Label>
+                  <Input
+                    value={code}
+                    onChange={e => setCode(e.target.value)}
+                    placeholder="______"
+                    maxLength={6}
+                    className="text-center text-2xl tracking-[0.5em] font-mono"
+                    onKeyDown={e => e.key === "Enter" && handleVerifySms()}
+                  />
+                  <p className="text-xs text-muted-foreground">Введите код из SMS, отправленного на {phone}</p>
+                  {debugCode && (
+                    <p className="text-xs text-primary font-medium bg-primary/10 rounded px-2 py-1">
+                      Демо-код: {debugCode}
+                    </p>
+                  )}
+                </div>
+
+                {hasPassword && (
+                  <button className="text-xs text-primary hover:underline" onClick={() => { setStep("password_login"); setPassword(""); }}>
+                    Войти по паролю
+                  </button>
+                )}
+
+                <Button className="w-full gap-2" onClick={handleVerifySms} disabled={loading || code.length < 6}>
+                  {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Check" size={16} />}
+                  Подтвердить
+                </Button>
+                <Button variant="ghost" className="w-full text-sm" onClick={() => { setStep("phone"); setCode(""); }}>
+                  Изменить номер
+                </Button>
+              </div>
+            )}
+
+            {step === "password_login" && (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Пароль</Label>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Введите пароль"
+                    onKeyDown={e => e.key === "Enter" && handlePasswordLogin()}
+                  />
+                </div>
+                <Button className="w-full gap-2" onClick={handlePasswordLogin} disabled={loading || !password}>
+                  {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="LogIn" size={16} />}
+                  Войти
+                </Button>
+                <Button variant="ghost" className="w-full text-sm" onClick={() => { setStep("sms"); setPassword(""); }}>
+                  Войти по SMS-коду
+                </Button>
+              </div>
+            )}
+
+            {step === "set_password" && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">Это ваш первый вход. Придумайте пароль для быстрого входа в будущем.</p>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Пароль</Label>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Минимум 6 символов"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Подтвердите пароль</Label>
+                  <Input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Повторите пароль"
+                    onKeyDown={e => e.key === "Enter" && handleSetPassword()}
+                  />
+                </div>
+                <Button className="w-full gap-2" onClick={handleSetPassword} disabled={loading || password.length < 6}>
+                  {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Lock" size={16} />}
+                  Создать пароль и войти
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <p className="text-center text-xs text-muted-foreground mt-6">
+          <a href="/" className="hover:underline">Перейти в систему управления</a>
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default Login;

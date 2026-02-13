@@ -59,7 +59,14 @@ const Sidebar = () => {
         })}
       </nav>
 
-      <div className="p-2 border-t border-sidebar-border">
+      <div className="p-2 border-t border-sidebar-border space-y-1">
+        <button
+          onClick={() => navigate("/cabinet/login")}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm transition-all"
+        >
+          <Icon name="ExternalLink" size={18} className="flex-shrink-0" />
+          {!collapsed && <span>Личный кабинет</span>}
+        </button>
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm transition-all"

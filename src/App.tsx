@@ -11,6 +11,8 @@ import Savings from "@/pages/Savings";
 import Shares from "@/pages/Shares";
 import Reports from "@/pages/Reports";
 import Admin from "@/pages/Admin";
+import CabinetLogin from "@/pages/cabinet/Login";
+import Cabinet from "@/pages/cabinet/Cabinet";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +33,8 @@ const App = () => (
             <Route path="/reports" element={<Reports />} />
             <Route path="/admin" element={<Admin />} />
           </Route>
+          <Route path="/cabinet/login" element={<CabinetLogin />} />
+          <Route path="/cabinet" element={<Cabinet />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

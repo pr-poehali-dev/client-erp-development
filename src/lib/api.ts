@@ -88,6 +88,22 @@ export const api = {
       URL.revokeObjectURL(url);
     },
   },
+
+  auth: {
+    sendSms: (phone: string) => request<AuthSmsResult>("POST", undefined, { entity: "auth", action: "send_sms", phone }),
+    verifySms: (phone: string, code: string) => request<AuthVerifyResult>("POST", undefined, { entity: "auth", action: "verify_sms", phone, code }),
+    setPassword: (setupToken: string, password: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "set_password", setup_token: setupToken, password }),
+    loginPassword: (phone: string, password: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "login_password", phone, password }),
+    changePassword: (token: string, oldPassword: string, newPassword: string) => request<{ success: boolean }>("POST", undefined, { entity: "auth", action: "change_password", token, old_password: oldPassword, new_password: newPassword }),
+    logout: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "auth", action: "logout", token }),
+    check: (token: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "check", token }),
+  },
+
+  cabinet: {
+    overview: (token: string) => request<CabinetOverview>("GET", { entity: "cabinet", action: "overview", token }),
+    loanDetail: (token: string, id: number) => request<LoanDetail>("GET", { entity: "cabinet", action: "loan_detail", token, id }),
+    savingDetail: (token: string, id: number) => request<CabinetSavingDetail>("GET", { entity: "cabinet", action: "saving_detail", token, id }),
+  },
 };
 
 export interface DashboardStats {
@@ -288,6 +304,42 @@ export interface ExportResult {
   file: string;
   content_type: string;
   filename: string;
+}
+
+export interface AuthSmsResult {
+  success: boolean;
+  has_password: boolean;
+  sms_sent: boolean;
+  debug_code?: string;
+  error?: string;
+}
+
+export interface AuthVerifyResult {
+  success: boolean;
+  has_password: boolean;
+  authenticated?: boolean;
+  token?: string;
+  setup_token?: string;
+  user?: { name: string; member_id: number };
+  error?: string;
+}
+
+export interface AuthLoginResult {
+  success: boolean;
+  token?: string;
+  user?: { name: string; member_id: number };
+  error?: string;
+}
+
+export interface CabinetOverview {
+  info: { name: string; member_no: string; phone: string; email: string };
+  loans: Loan[];
+  savings: Saving[];
+  shares: ShareAccount[];
+}
+
+export interface CabinetSavingDetail extends Saving {
+  schedule: SavingsScheduleItem[];
 }
 
 export default api;
