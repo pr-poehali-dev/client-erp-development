@@ -562,10 +562,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
 def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_type):
-    cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND status='paid'" % sid)
-    paid_ids = [r[0] for r in cur.fetchall()]
-    cur.execute("UPDATE savings_schedule SET status='obsolete' WHERE saving_id=%s AND status IN ('pending','accrued')" % sid)
+    cur.execute("DELETE FROM savings_schedule WHERE saving_id=%s AND status IN ('pending','accrued')" % sid)
     schedule = calc_savings_schedule(amount, rate, term, start_date, payout_type)
+    today = date.today().isoformat()
     for item in schedule:
         cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='paid'" % (sid, item['period_no']))
         paid_row = cur.fetchone()
@@ -573,17 +572,9 @@ def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_typ
             cur.execute("UPDATE savings_schedule SET period_start='%s', period_end='%s', interest_amount=%s, cumulative_interest=%s, balance_after=%s WHERE id=%s" % (
                 item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after'], paid_row[0]))
             continue
-        cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='obsolete'" % (sid, item['period_no']))
-        old = cur.fetchone()
-        if old:
-            cur.execute("UPDATE savings_schedule SET period_start='%s', period_end='%s', interest_amount=%s, cumulative_interest=%s, balance_after=%s, status='pending' WHERE id=%s" % (
-                item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after'], old[0]))
-        else:
-            cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (
-                sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
-    cur.execute("UPDATE savings_schedule SET status='pending' WHERE saving_id=%s AND status='obsolete'" % sid)
-    today = date.today().isoformat()
-    cur.execute("UPDATE savings_schedule SET status='accrued' WHERE saving_id=%s AND status='pending' AND period_end <= '%s'" % (sid, today))
+        new_status = 'accrued' if item['period_end'] <= today else 'pending'
+        cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after,status) VALUES (%s,%s,'%s','%s',%s,%s,%s,'%s')" % (
+            sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after'], new_status))
     return schedule
 
 def get_accrued_interest_end_of_prev_month(cur, sid):
