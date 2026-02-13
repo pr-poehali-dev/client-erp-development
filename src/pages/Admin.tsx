@@ -10,9 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
+import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser, AuditLogEntry } from "@/lib/api";
+import api, { StaffUser, AuditLogEntry, Member } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -52,8 +53,11 @@ const Admin = () => {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
 
+  const [members, setMembers] = useState<Member[]>([]);
   const [form, setForm] = useState({ login: "", name: "", role: "manager", password: "", email: "", phone: "" });
-  const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "" });
+  const [showClientForm, setShowClientForm] = useState(false);
+  const [clientForm, setClientForm] = useState({ login: "", name: "", password: "", phone: "", member_id: "" });
+  const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "", member_id: "" as string });
   const [pwForm, setPwForm] = useState({ old_password: "", new_password: "" });
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
@@ -63,7 +67,7 @@ const Admin = () => {
 
   const load = () => {
     setLoading(true);
-    api.users.list().then(setUsers).finally(() => setLoading(false));
+    Promise.all([api.users.list(), api.members.list()]).then(([u, m]) => { setUsers(u); setMembers(m); }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
@@ -98,9 +102,25 @@ const Admin = () => {
     }
   };
 
+  const handleCreateClient = async () => {
+    if (!clientForm.login || !clientForm.name || !clientForm.password || !clientForm.member_id) return;
+    setSaving(true);
+    try {
+      await api.users.create({ login: clientForm.login, name: clientForm.name, role: "client", password: clientForm.password, phone: clientForm.phone, member_id: Number(clientForm.member_id) });
+      toast({ title: "Клиент создан", description: "Теперь пайщик сможет входить в личный кабинет" });
+      setShowClientForm(false);
+      setClientForm({ login: "", name: "", password: "", phone: "", member_id: "" });
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openEdit = (u: UserRow) => {
     setEditUser(u);
-    setEditForm({ name: u.name, role: u.role, login: u.login || "", email: u.email || "", phone: u.phone || "", status: u.status, password: "" });
+    setEditForm({ name: u.name, role: u.role, login: u.login || "", email: u.email || "", phone: u.phone || "", status: u.status, password: "", member_id: u.member_id ? String(u.member_id) : "" });
     setShowEdit(true);
   };
 
@@ -116,6 +136,8 @@ const Admin = () => {
       if (editForm.phone !== (editUser.phone || "")) data.phone = editForm.phone;
       if (editForm.status !== editUser.status) data.status = editForm.status;
       if (editForm.password) data.password = editForm.password;
+      const newMid = editForm.member_id ? Number(editForm.member_id) : null;
+      if (newMid !== editUser.member_id) data.member_id = newMid;
       await api.users.update(data as Parameters<typeof api.users.update>[0]);
       toast({ title: "Сохранено" });
       setShowEdit(false);
@@ -215,14 +237,66 @@ const Admin = () => {
         </TabsContent>
 
         <TabsContent value="clients" className="mt-4 space-y-4">
-          <Card className="p-4">
-            <div className="text-xs text-muted-foreground mb-1">Клиентов в личном кабинете</div>
-            <div className="text-xl font-bold">{clientUsers.length}</div>
-          </Card>
+          <div className="flex items-center justify-between">
+            <Card className="p-4 flex-1 mr-4">
+              <div className="text-xs text-muted-foreground mb-1">Клиентов в личном кабинете</div>
+              <div className="text-xl font-bold">{clientUsers.length}</div>
+            </Card>
+            <Button onClick={() => { setClientForm({ login: "", name: "", password: "", phone: "", member_id: "" }); setShowClientForm(true); }} className="gap-2">
+              <Icon name="UserPlus" size={16} />Добавить клиента
+            </Button>
+          </div>
           {loading ? (
             <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
           ) : (
-            <DataTable columns={columns} data={clientUsers} emptyMessage="Нет клиентов" />
+            <div className="border rounded-lg overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Логин</th>
+                    <th className="px-3 py-2 text-left font-medium">Имя</th>
+                    <th className="px-3 py-2 text-left font-medium">Пайщик</th>
+                    <th className="px-3 py-2 text-left font-medium">Телефон</th>
+                    <th className="px-3 py-2 text-left font-medium">Статус</th>
+                    <th className="px-3 py-2 text-left font-medium">Последний вход</th>
+                    <th className="px-3 py-2 text-center font-medium w-20"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {clientUsers.map(u => {
+                    const member = members.find(m => m.id === u.member_id);
+                    return (
+                      <tr key={u.id} className="hover:bg-muted/30">
+                        <td className="px-3 py-2 font-medium">{u.login}</td>
+                        <td className="px-3 py-2">{u.name}</td>
+                        <td className="px-3 py-2">
+                          {member ? (
+                            <div>
+                              <span className="text-xs font-medium">{member.name}</span>
+                              <span className="text-[10px] text-muted-foreground ml-1">({member.member_no})</span>
+                            </div>
+                          ) : u.member_id ? (
+                            <span className="text-xs text-muted-foreground">ID: {u.member_id}</span>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">Не привязан</Badge>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs">{u.phone || "—"}</td>
+                        <td className="px-3 py-2"><Badge variant={u.status === "active" ? "default" : "outline"} className="text-xs">{statusLabels[u.status] || u.status}</Badge></td>
+                        <td className="px-3 py-2 text-xs">{fmtDate(u.last_login)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex gap-1 justify-center">
+                            <button className="p-1 rounded hover:bg-muted" title="Редактировать" onClick={() => openEdit(u)}><Icon name="Pencil" size={14} /></button>
+                            {u.status === "active" && <button className="p-1 rounded hover:bg-muted text-destructive" title="Заблокировать" onClick={() => handleDelete(u)}><Icon name="Ban" size={14} /></button>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {clientUsers.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">Нет клиентов. Добавьте первого клиента для доступа в личный кабинет.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           )}
         </TabsContent>
 
@@ -452,6 +526,7 @@ const Admin = () => {
                   <SelectContent>
                     <SelectItem value="admin">Администратор</SelectItem>
                     <SelectItem value="manager">Менеджер</SelectItem>
+                    <SelectItem value="client">Клиент</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -466,6 +541,12 @@ const Admin = () => {
                 </Select>
               </div>
             </div>
+            {editForm.role === "client" && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Привязка к пайщику</Label>
+                <MemberSearch members={members} value={editForm.member_id} onChange={(id) => setEditForm({ ...editForm, member_id: id })} />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Email</Label>
@@ -482,6 +563,49 @@ const Admin = () => {
             </div>
             <Button onClick={handleUpdate} disabled={saving} className="w-full">
               {saving ? "Сохранение..." : "Сохранить"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showClientForm} onOpenChange={setShowClientForm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Новый клиент личного кабинета</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Привязка к пайщику *</Label>
+              <MemberSearch members={members} value={clientForm.member_id} onChange={(id) => {
+                const m = members.find(x => String(x.id) === id);
+                setClientForm(p => ({
+                  ...p,
+                  member_id: id,
+                  name: m ? m.name : p.name,
+                  phone: m?.phone || p.phone,
+                  login: m?.phone ? m.phone.replace(/\D/g, "").slice(-10) : p.login,
+                }));
+              }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Логин * (телефон или произвольный)</Label>
+              <Input value={clientForm.login} onChange={(e) => setClientForm({ ...clientForm, login: e.target.value })} placeholder="79001234567" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">ФИО *</Label>
+              <Input value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Телефон</Label>
+              <Input value={clientForm.phone} onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Пароль *</Label>
+              <Input type="password" value={clientForm.password} onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })} placeholder="Не менее 6 символов" />
+            </div>
+            <Card className="p-3 bg-muted/50">
+              <div className="text-xs text-muted-foreground">Клиент сможет входить в личный кабинет по логину и паролю. В кабинете он увидит все договоры и счета привязанного пайщика.</div>
+            </Card>
+            <Button onClick={handleCreateClient} disabled={saving || !clientForm.login || !clientForm.name || !clientForm.password || !clientForm.member_id} className="w-full">
+              {saving ? "Создание..." : "Создать клиента"}
             </Button>
           </div>
         </DialogContent>

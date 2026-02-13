@@ -112,7 +112,7 @@ export const api = {
     sendSms: (phone: string) => request<AuthSmsResult>("POST", undefined, { entity: "auth", action: "send_sms", phone }),
     verifySms: (phone: string, code: string) => request<AuthVerifyResult>("POST", undefined, { entity: "auth", action: "verify_sms", phone, code }),
     setPassword: (setupToken: string, password: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "set_password", setup_token: setupToken, password }),
-    loginPassword: (phone: string, password: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "login_password", phone, password }),
+    loginPassword: (phone: string, password: string, login?: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "login_password", phone, login, password }),
     changePassword: (token: string, oldPassword: string, newPassword: string) => request<{ success: boolean }>("POST", undefined, { entity: "auth", action: "change_password", token, old_password: oldPassword, new_password: newPassword }),
     logout: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "auth", action: "logout", token }),
     check: (token: string) => request<AuthLoginResult>("POST", undefined, { entity: "auth", action: "check", token }),
@@ -134,9 +134,9 @@ export const api = {
   users: {
     list: () => request<StaffUser[]>("GET", { entity: "users" }),
     get: (id: number) => request<StaffUser>("GET", { entity: "users", id }),
-    create: (data: { login: string; name: string; role: string; password: string; email?: string; phone?: string }) =>
+    create: (data: { login: string; name: string; role: string; password: string; email?: string; phone?: string; member_id?: number }) =>
       request<{ id: number; login: string }>("POST", undefined, { entity: "users", action: "create", ...data }),
-    update: (data: { id: number; name?: string; role?: string; login?: string; email?: string; phone?: string; password?: string; status?: string }) =>
+    update: (data: { id: number; name?: string; role?: string; login?: string; email?: string; phone?: string; password?: string; status?: string; member_id?: number | null }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "users", action: "update", ...data }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "users", action: "delete", id }),
   },

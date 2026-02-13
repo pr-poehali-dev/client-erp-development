@@ -1425,19 +1425,27 @@ def handle_users(method, params, body, staff, cur, conn):
             password = body.get('password', '')
             email = body.get('email', '')
             phone = body.get('phone', '')
+            member_id = body.get('member_id')
             if not login or not name:
                 return {'error': 'Логин и имя обязательны'}
-            if role not in ('admin', 'manager'):
-                return {'error': 'Роль должна быть admin или manager'}
+            if role not in ('admin', 'manager', 'client'):
+                return {'error': 'Недопустимая роль'}
+            if role == 'client' and not member_id:
+                return {'error': 'Для клиента необходимо указать пайщика'}
             if not password or len(password) < 6:
                 return {'error': 'Пароль не менее 6 символов'}
             cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
             if cur.fetchone():
                 return {'error': 'Логин уже занят'}
+            if member_id:
+                cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client'" % int(member_id))
+                if cur.fetchone():
+                    return {'error': 'У этого пайщика уже есть учётная запись'}
             pw_hash = hash_password(password)
-            cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash) VALUES ('%s','%s','%s','%s','%s','%s') RETURNING id" % (esc(login), esc(name), esc(email), esc(phone), role, pw_hash))
+            mid_sql = str(int(member_id)) if member_id else 'NULL'
+            cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','%s','%s','%s','%s',%s) RETURNING id" % (esc(login), esc(name), esc(email), esc(phone), role, pw_hash, mid_sql))
             uid = cur.fetchone()[0]
-            audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), '', '')
+            audit_log(cur, staff, 'create', 'user', uid, '%s (%s)' % (login, role), 'member_id: %s' % mid_sql, '')
             conn.commit()
             return {'id': uid, 'login': login}
         elif action == 'update':
@@ -1450,6 +1458,15 @@ def handle_users(method, params, body, staff, cur, conn):
                     if f == 'role' and body[f] not in ('admin', 'manager', 'client'):
                         return {'error': 'Недопустимая роль'}
                     updates.append("%s='%s'" % (f, esc(body[f])))
+            if 'member_id' in body:
+                mid = body['member_id']
+                if mid:
+                    cur.execute("SELECT id FROM users WHERE member_id=%s AND role='client' AND id!=%s" % (int(mid), uid))
+                    if cur.fetchone():
+                        return {'error': 'У этого пайщика уже есть учётная запись'}
+                    updates.append("member_id=%s" % int(mid))
+                else:
+                    updates.append("member_id=NULL")
             if body.get('password'):
                 if len(body['password']) < 6:
                     return {'error': 'Пароль не менее 6 символов'}
@@ -1571,14 +1588,20 @@ def handle_auth(method, body, cur, conn):
 
     elif action == 'login_password':
         phone = body.get('phone', '').strip()
+        login = body.get('login', '').strip()
         password = body.get('password', '')
-        clean_phone = ''.join(c for c in phone if c.isdigit())
         pw_hash = hash_password(password)
 
-        cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_phone[-10:], pw_hash))
-        row = cur.fetchone()
+        row = None
+        if login:
+            cur.execute("SELECT u.id, u.name, u.member_id FROM users u WHERE u.login='%s' AND u.role='client' AND u.password_hash='%s' AND u.status='active'" % (esc(login), pw_hash))
+            row = cur.fetchone()
+        if not row and phone:
+            clean_phone = ''.join(c for c in phone if c.isdigit())
+            cur.execute("SELECT u.id, u.name, u.member_id FROM users u JOIN members m ON m.id=u.member_id WHERE REPLACE(REPLACE(REPLACE(REPLACE(m.phone,' ',''),'-',''),'(',''),')','') LIKE '%%%s%%' AND u.role='client' AND u.password_hash='%s'" % (clean_phone[-10:], pw_hash))
+            row = cur.fetchone()
         if not row:
-            return {'error': 'Неверный телефон или пароль'}
+            return {'error': 'Неверный логин/телефон или пароль'}
 
         user_id, name, member_id = row
         token = generate_token()

@@ -8,11 +8,12 @@ import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api";
 
-type Step = "phone" | "sms" | "password_login" | "set_password";
+type Step = "choose" | "phone" | "sms" | "password_login" | "set_password" | "login_form";
 
 const Login = () => {
-  const [step, setStep] = useState<Step>("phone");
+  const [step, setStep] = useState<Step>("choose");
   const [phone, setPhone] = useState("");
+  const [loginField, setLoginField] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -112,6 +113,23 @@ const Login = () => {
     }
   };
 
+  const handleLoginForm = async () => {
+    if (!loginField || !password) return;
+    setLoading(true);
+    try {
+      const res = await api.auth.loginPassword("", password, loginField);
+      if (res.error) {
+        toast({ title: res.error, variant: "destructive" });
+        return;
+      }
+      if (res.token && res.user) saveAuth(res.token, res.user);
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -126,13 +144,48 @@ const Login = () => {
         <Card className="shadow-lg">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg">
-              {step === "phone" && "Вход в кабинет"}
+              {step === "choose" && "Вход в кабинет"}
+              {step === "phone" && "Вход по SMS"}
               {step === "sms" && "Подтверждение"}
               {step === "password_login" && "Введите пароль"}
               {step === "set_password" && "Создайте пароль"}
+              {step === "login_form" && "Вход по логину"}
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {step === "choose" && (
+              <div className="space-y-3">
+                <Button className="w-full gap-2 h-12" variant="outline" onClick={() => setStep("login_form")}>
+                  <Icon name="User" size={18} />
+                  Войти по логину и паролю
+                </Button>
+                <Button className="w-full gap-2 h-12" variant="outline" onClick={() => setStep("phone")}>
+                  <Icon name="Smartphone" size={18} />
+                  Войти по номеру телефона
+                </Button>
+              </div>
+            )}
+
+            {step === "login_form" && (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Логин</Label>
+                  <Input value={loginField} onChange={e => setLoginField(e.target.value)} placeholder="Ваш логин" onKeyDown={e => e.key === "Enter" && document.getElementById("lf-pw")?.focus()} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Пароль</Label>
+                  <Input id="lf-pw" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Ваш пароль" onKeyDown={e => e.key === "Enter" && handleLoginForm()} />
+                </div>
+                <Button className="w-full gap-2" onClick={handleLoginForm} disabled={loading || !loginField || !password}>
+                  {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="LogIn" size={16} />}
+                  Войти
+                </Button>
+                <Button variant="ghost" className="w-full text-sm" onClick={() => { setStep("choose"); setPassword(""); setLoginField(""); }}>
+                  Назад
+                </Button>
+              </div>
+            )}
+
             {step === "phone" && (
               <div className="space-y-4">
                 <div className="space-y-1.5">
@@ -148,6 +201,9 @@ const Login = () => {
                 <Button className="w-full gap-2" onClick={handleSendSms} disabled={loading || !phone.trim()}>
                   {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Send" size={16} />}
                   Получить SMS-код
+                </Button>
+                <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("choose")}>
+                  Назад
                 </Button>
               </div>
             )}
