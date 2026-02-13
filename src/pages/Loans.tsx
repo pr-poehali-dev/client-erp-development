@@ -44,6 +44,8 @@ const Loans = () => {
   const [showDetail, setShowDetail] = useState(false);
   const [detail, setDetail] = useState<LoanDetail | null>(null);
   const [showPayment, setShowPayment] = useState(false);
+  const [showEarly, setShowEarly] = useState(false);
+  const [showModify, setShowModify] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
@@ -51,6 +53,12 @@ const Loans = () => {
   const [preview, setPreview] = useState<ScheduleItem[] | null>(null);
   const [previewMonthly, setPreviewMonthly] = useState(0);
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
+  const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
+  const [earlyPreview, setEarlyPreview] = useState<ScheduleItem[] | null>(null);
+  const [earlyMonthly, setEarlyMonthly] = useState(0);
+  const [modifyForm, setModifyForm] = useState({ new_rate: "", new_term: "" });
+  const [modifyPreview, setModifyPreview] = useState<ScheduleItem[] | null>(null);
+  const [modifyMonthly, setModifyMonthly] = useState(0);
 
   const load = () => {
     setLoading(true);
@@ -99,6 +107,76 @@ const Loans = () => {
       await api.loans.payment({ loan_id: detail.id, payment_date: payForm.date, amount: Number(payForm.amount) });
       toast({ title: "Платёж внесён" });
       setShowPayment(false);
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEarlyPreview = async () => {
+    if (!detail || !earlyForm.amount) return;
+    const newBalance = detail.balance - Number(earlyForm.amount);
+    if (newBalance <= 0) {
+      setEarlyPreview(null);
+      setEarlyMonthly(0);
+      return;
+    }
+    const paidCount = detail.schedule.filter(s => s.status === "paid").length;
+    const remainingTerm = earlyForm.repayment_type === "reduce_payment"
+      ? detail.term_months - paidCount
+      : Math.max(Math.ceil(newBalance / (detail.monthly_payment / 2)), 1);
+    const res = await api.loans.calcSchedule(newBalance, detail.rate, Math.max(remainingTerm, 1), detail.schedule_type, earlyForm.date);
+    setEarlyPreview(res.schedule);
+    setEarlyMonthly(res.monthly_payment);
+  };
+
+  const handleEarlyRepayment = async () => {
+    if (!detail || !earlyForm.amount) return;
+    setSaving(true);
+    try {
+      await api.loans.earlyRepayment({
+        loan_id: detail.id, amount: Number(earlyForm.amount),
+        repayment_type: earlyForm.repayment_type, payment_date: earlyForm.date,
+      });
+      const isFullClose = Number(earlyForm.amount) >= detail.balance;
+      toast({ title: isFullClose ? "Займ полностью погашен" : "Досрочное погашение проведено" });
+      setShowEarly(false);
+      setEarlyPreview(null);
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleModifyPreview = async () => {
+    if (!detail) return;
+    const rate = modifyForm.new_rate ? Number(modifyForm.new_rate) : detail.rate;
+    const term = modifyForm.new_term ? Number(modifyForm.new_term) : detail.term_months;
+    const res = await api.loans.calcSchedule(detail.balance, rate, term, detail.schedule_type, new Date().toISOString().slice(0, 10));
+    setModifyPreview(res.schedule);
+    setModifyMonthly(res.monthly_payment);
+  };
+
+  const handleModify = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.loans.modify({
+        loan_id: detail.id,
+        new_rate: modifyForm.new_rate ? Number(modifyForm.new_rate) : undefined,
+        new_term: modifyForm.new_term ? Number(modifyForm.new_term) : undefined,
+      });
+      toast({ title: "Параметры договора изменены" });
+      setShowModify(false);
+      setModifyPreview(null);
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();
@@ -281,17 +359,17 @@ const Loans = () => {
 
                 <TabsContent value="actions" className="mt-4">
                   <div className="grid grid-cols-2 gap-3">
-                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" onClick={() => { setPayForm({ amount: "", date: new Date().toISOString().slice(0, 10) }); setShowPayment(true); }}>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status === "closed"} onClick={() => { setPayForm({ amount: "", date: new Date().toISOString().slice(0, 10) }); setShowPayment(true); }}>
                       <div className="flex items-center gap-2"><Icon name="CreditCard" size={16} /><span className="font-medium text-sm">Внести платёж</span></div>
                       <span className="text-xs text-muted-foreground">Указать дату и сумму платежа</span>
                     </Button>
-                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1">
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status === "closed"} onClick={() => { setEarlyForm({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) }); setEarlyPreview(null); setShowEarly(true); }}>
                       <div className="flex items-center gap-2"><Icon name="FastForward" size={16} /><span className="font-medium text-sm">Досрочное погашение</span></div>
-                      <span className="text-xs text-muted-foreground">Частичное или полное</span>
+                      <span className="text-xs text-muted-foreground">Частичное или полное, с пересчётом графика</span>
                     </Button>
-                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1">
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status === "closed"} onClick={() => { setModifyForm({ new_rate: String(detail.rate), new_term: String(detail.term_months) }); setModifyPreview(null); setShowModify(true); }}>
                       <div className="flex items-center gap-2"><Icon name="Settings2" size={16} /><span className="font-medium text-sm">Изменить параметры</span></div>
-                      <span className="text-xs text-muted-foreground">Срок, ставка, перерасчёт</span>
+                      <span className="text-xs text-muted-foreground">Срок, ставка, перерасчёт графика</span>
                     </Button>
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1">
                       <div className="flex items-center gap-2"><Icon name="FileText" size={16} /><span className="font-medium text-sm">Выписка по счёту</span></div>
@@ -309,13 +387,195 @@ const Loans = () => {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Внести платёж</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Текущий остаток:</span>
+                  <span className="font-semibold">{fmt(detail.balance)}</span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span className="text-muted-foreground">Ежемесячный платёж:</span>
+                  <span className="font-medium">{fmt(detail.monthly_payment)}</span>
+                </div>
+              </Card>
+            )}
             <div className="space-y-1.5"><Label className="text-xs">Дата платежа</Label><Input type="date" value={payForm.date} onChange={e => setPayForm(p => ({ ...p, date: e.target.value }))} /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Сумма, ₽</Label><Input type="number" value={payForm.amount} onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Сумма, ₽</Label><Input type="number" value={payForm.amount} onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))} placeholder={detail ? String(Math.round(detail.monthly_payment)) : ""} /></div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setShowPayment(false)}>Отмена</Button>
               <Button onClick={handlePayment} disabled={saving || !payForm.amount} className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Check" size={16} />}
                 Провести
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEarly} onOpenChange={v => { setShowEarly(v); if (!v) setEarlyPreview(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Досрочное погашение</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50">
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div><span className="text-muted-foreground">Договор:</span> <span className="font-semibold">{detail.contract_no}</span></div>
+                  <div><span className="text-muted-foreground">Остаток:</span> <span className="font-semibold text-primary">{fmt(detail.balance)}</span></div>
+                  <div><span className="text-muted-foreground">Платёж:</span> <span className="font-medium">{fmt(detail.monthly_payment)}</span></div>
+                </div>
+              </Card>
+            )}
+
+            <div className="space-y-1.5"><Label className="text-xs">Дата погашения</Label><Input type="date" value={earlyForm.date} onChange={e => setEarlyForm(p => ({ ...p, date: e.target.value }))} /></div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Сумма досрочного погашения, ₽</Label>
+              <Input type="number" value={earlyForm.amount} onChange={e => setEarlyForm(p => ({ ...p, amount: e.target.value }))} placeholder={detail ? String(Math.round(detail.balance)) : ""} />
+              {detail && earlyForm.amount && Number(earlyForm.amount) >= detail.balance && (
+                <p className="text-xs text-success font-medium flex items-center gap-1"><Icon name="CheckCircle" size={12} />Полное погашение займа</p>
+              )}
+              {detail && earlyForm.amount && Number(earlyForm.amount) < detail.balance && (
+                <p className="text-xs text-muted-foreground">Новый остаток: {fmt(detail.balance - Number(earlyForm.amount))}</p>
+              )}
+            </div>
+
+            {detail && earlyForm.amount && Number(earlyForm.amount) < detail.balance && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Вариант пересчёта</Label>
+                <Select value={earlyForm.repayment_type} onValueChange={v => setEarlyForm(p => ({ ...p, repayment_type: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="reduce_term">
+                      <div className="flex flex-col"><span>Сократить срок</span><span className="text-xs text-muted-foreground">Платёж останется прежним</span></div>
+                    </SelectItem>
+                    <SelectItem value="reduce_payment">
+                      <div className="flex flex-col"><span>Уменьшить платёж</span><span className="text-xs text-muted-foreground">Срок останется прежним</span></div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {detail && earlyForm.amount && Number(earlyForm.amount) < detail.balance && (
+              <Button variant="outline" onClick={handleEarlyPreview} className="gap-2"><Icon name="Calculator" size={16} />Рассчитать новый график</Button>
+            )}
+
+            {earlyPreview && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Новый график: платёж {fmt(earlyMonthly)}, {earlyPreview.length} мес.</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left py-2 px-2">№</th><th className="text-left py-2 px-2">Дата</th>
+                        <th className="text-right py-2 px-2">Платёж</th><th className="text-right py-2 px-2">Осн. долг</th>
+                        <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Остаток</th>
+                      </tr></thead>
+                      <tbody>{earlyPreview.map(r => (
+                        <tr key={r.payment_no} className="border-b last:border-0">
+                          <td className="py-1.5 px-2">{r.payment_no}</td><td className="py-1.5 px-2">{fmtDate(r.payment_date)}</td>
+                          <td className="py-1.5 px-2 text-right font-medium">{fmt(r.payment_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.principal_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.interest_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.balance_after)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowEarly(false)}>Отмена</Button>
+              <Button onClick={handleEarlyRepayment} disabled={saving || !earlyForm.amount} className="gap-2" variant={detail && earlyForm.amount && Number(earlyForm.amount) >= detail.balance ? "default" : "default"}>
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Check" size={16} />}
+                {detail && earlyForm.amount && Number(earlyForm.amount) >= detail.balance ? "Полностью погасить" : "Провести досрочное погашение"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showModify} onOpenChange={v => { setShowModify(v); if (!v) setModifyPreview(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Изменение параметров договора</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <Card className="p-3 bg-muted/50">
+                <div className="grid grid-cols-4 gap-4 text-sm">
+                  <div><span className="text-muted-foreground">Договор:</span> <span className="font-semibold">{detail.contract_no}</span></div>
+                  <div><span className="text-muted-foreground">Остаток:</span> <span className="font-semibold text-primary">{fmt(detail.balance)}</span></div>
+                  <div><span className="text-muted-foreground">Текущая ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
+                  <div><span className="text-muted-foreground">Текущий срок:</span> <span className="font-medium">{detail.term_months} мес.</span></div>
+                </div>
+              </Card>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Новая ставка, % годовых</Label>
+                <Input type="number" step="0.1" value={modifyForm.new_rate} onChange={e => setModifyForm(p => ({ ...p, new_rate: e.target.value }))} />
+                {detail && modifyForm.new_rate && Number(modifyForm.new_rate) !== detail.rate && (
+                  <p className="text-xs text-muted-foreground">
+                    {Number(modifyForm.new_rate) < detail.rate ? "↓" : "↑"} Изменение с {detail.rate}% на {modifyForm.new_rate}%
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Новый срок, месяцев</Label>
+                <Input type="number" value={modifyForm.new_term} onChange={e => setModifyForm(p => ({ ...p, new_term: e.target.value }))} />
+                {detail && modifyForm.new_term && Number(modifyForm.new_term) !== detail.term_months && (
+                  <p className="text-xs text-muted-foreground">
+                    Изменение с {detail.term_months} на {modifyForm.new_term} мес.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <Button variant="outline" onClick={handleModifyPreview} className="gap-2"><Icon name="Calculator" size={16} />Рассчитать новый график</Button>
+
+            {modifyPreview && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm">Новый график: платёж {fmt(modifyMonthly)}</CardTitle>
+                    {detail && (
+                      <Badge variant={modifyMonthly < detail.monthly_payment ? "default" : "destructive"} className="text-xs">
+                        {modifyMonthly < detail.monthly_payment ? "↓" : "↑"} {fmt(Math.abs(modifyMonthly - detail.monthly_payment))}
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b text-xs text-muted-foreground">
+                        <th className="text-left py-2 px-2">№</th><th className="text-left py-2 px-2">Дата</th>
+                        <th className="text-right py-2 px-2">Платёж</th><th className="text-right py-2 px-2">Осн. долг</th>
+                        <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Остаток</th>
+                      </tr></thead>
+                      <tbody>{modifyPreview.map(r => (
+                        <tr key={r.payment_no} className="border-b last:border-0">
+                          <td className="py-1.5 px-2">{r.payment_no}</td><td className="py-1.5 px-2">{fmtDate(r.payment_date)}</td>
+                          <td className="py-1.5 px-2 text-right font-medium">{fmt(r.payment_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.principal_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.interest_amount)}</td>
+                          <td className="py-1.5 px-2 text-right">{fmt(r.balance_after)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowModify(false)}>Отмена</Button>
+              <Button onClick={handleModify} disabled={saving || (!modifyForm.new_rate && !modifyForm.new_term)} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                Сохранить изменения
               </Button>
             </div>
           </div>
