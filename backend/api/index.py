@@ -1089,6 +1089,33 @@ def fmt_money(n):
         return '0.00'
     return '{:,.2f}'.format(float(n)).replace(',', ' ')
 
+_font_registered = False
+
+def register_cyrillic_font():
+    global _font_registered
+    if _font_registered:
+        return 'DejaVuSans', 'DejaVuSans-Bold'
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    paths = [
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
+        ('/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf', '/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf'),
+    ]
+    for reg_path, bold_path in paths:
+        if os.path.exists(reg_path):
+            pdfmetrics.registerFont(TTFont('DejaVuSans', reg_path))
+            pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', bold_path if os.path.exists(bold_path) else reg_path))
+            _font_registered = True
+            return 'DejaVuSans', 'DejaVuSans-Bold'
+    import urllib.request
+    for name, fn in [('DejaVuSans', 'DejaVuSans.ttf'), ('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf')]:
+        tmp = '/tmp/%s' % fn
+        if not os.path.exists(tmp):
+            urllib.request.urlretrieve('https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/main/ttf/%s' % fn, tmp)
+        pdfmetrics.registerFont(TTFont(name, tmp))
+    _font_registered = True
+    return 'DejaVuSans', 'DejaVuSans-Bold'
+
 def generate_loan_xlsx(loan, schedule, payments, member_name):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -1223,103 +1250,94 @@ def generate_loan_xlsx(loan, schedule, payments, member_name):
     return buf.getvalue()
 
 def generate_loan_pdf(loan, schedule, payments, member_name):
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
 
+    font_r, font_b = register_cyrillic_font()
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     story = []
 
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=14, spaceAfter=6)
-    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, spaceAfter=2)
+    title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
+    sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
+    footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
 
-    story.append(Paragraph('Vyipiska po dogovoru zayma %s' % loan.get('contract_no', ''), title_style))
+    story.append(Paragraph('Выписка по договору займа %s' % loan.get('contract_no', ''), title_style))
+    story.append(Spacer(1, 4))
 
-    status_map = {'active': 'Aktiven', 'closed': 'Zakryt', 'overdue': 'Prosrochen'}
+    status_map = {'active': 'Активен', 'closed': 'Закрыт', 'overdue': 'Просрочен'}
     info_data = [
-        ['Payschik:', member_name, 'Summa:', '%s rub.' % fmt_money(loan.get('amount'))],
-        ['Stavka:', '%s%%' % loan.get('rate', ''), 'Srok:', '%s mes.' % loan.get('term_months', '')],
-        ['Period:', '%s - %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date'))), 'Ostatok:', '%s rub.' % fmt_money(loan.get('balance'))],
-        ['Status:', status_map.get(loan.get('status', ''), loan.get('status', '')), '', ''],
+        ['Пайщик:', member_name, 'Сумма:', '%s руб.' % fmt_money(loan.get('amount'))],
+        ['Ставка:', '%s%% годовых' % loan.get('rate', ''), 'Срок:', '%s мес.' % loan.get('term_months', '')],
+        ['Период:', '%s — %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date'))), 'Остаток:', '%s руб.' % fmt_money(loan.get('balance'))],
+        ['Статус:', status_map.get(loan.get('status', ''), loan.get('status', '')), '', ''],
     ]
-    info_table = Table(info_data, colWidths=[70, 180, 70, 180])
+    info_table = Table(info_data, colWidths=[55, 150, 55, 150])
     info_table.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (2, 0), (2, -1), font_b),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2), ('TOPPADDING', (0, 0), (-1, -1), 1),
     ]))
     story.append(info_table)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 6))
 
-    story.append(Paragraph('Grafik platezhey', ParagraphStyle('SH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
-
-    sched_data = [['N', 'Data', 'Platezh', 'Osn. dolg', 'Protsenty', 'Ostatok', 'Status']]
-    status_labels = {'pending': 'Ozhidaetsya', 'paid': 'Oplatchen', 'partial': 'Chastichno', 'overdue': 'Prosrochen'}
+    story.append(Paragraph('График платежей', sub_style))
+    sched_data = [['№', 'Дата', 'Платёж', 'Осн. долг', 'Проценты', 'Остаток', 'Статус']]
+    status_labels = {'pending': 'Ожидается', 'paid': 'Оплачен', 'partial': 'Частично', 'overdue': 'Просрочен'}
     for item in schedule:
         sched_data.append([
-            str(item.get('payment_no', '')),
-            fmt_date(item.get('payment_date')),
-            fmt_money(item.get('payment_amount', 0)),
-            fmt_money(item.get('principal_amount', 0)),
-            fmt_money(item.get('interest_amount', 0)),
-            fmt_money(item.get('balance_after', 0)),
+            str(item.get('payment_no', '')), fmt_date(item.get('payment_date')),
+            fmt_money(item.get('payment_amount', 0)), fmt_money(item.get('principal_amount', 0)),
+            fmt_money(item.get('interest_amount', 0)), fmt_money(item.get('balance_after', 0)),
             status_labels.get(item.get('status', 'pending'), item.get('status', '')),
         ])
     total_payment = sum(float(i.get('payment_amount', 0)) for i in schedule)
     total_principal = sum(float(i.get('principal_amount', 0)) for i in schedule)
     total_interest = sum(float(i.get('interest_amount', 0)) for i in schedule)
-    sched_data.append(['ITOGO', '', fmt_money(total_payment), fmt_money(total_principal), fmt_money(total_interest), '', ''])
+    sched_data.append(['ИТОГО', '', fmt_money(total_payment), fmt_money(total_principal), fmt_money(total_interest), '', ''])
 
-    st = Table(sched_data, colWidths=[30, 70, 85, 85, 85, 85, 75])
+    cw = [22, 58, 68, 68, 60, 68, 58]
+    st = Table(sched_data, colWidths=cw, repeatRows=1)
     st.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2EFDA')),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('ALIGN', (2, 0), (5, -1), 'RIGHT'),
-        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#F2F2F2')),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dce6f0')),
+        ('FONTNAME', (0, -1), (-1, -1), font_b), ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#eef2f7')),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'), ('ALIGN', (2, 0), (5, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f8f9fb')]),
     ]))
     story.append(st)
-    story.append(Spacer(1, 10))
 
     if payments:
-        story.append(Paragraph('Istoriya platezhey', ParagraphStyle('PH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
-        pay_data = [['Data', 'Summa', 'Osn. dolg', 'Protsenty', 'Shtrafy', 'Tip']]
-        type_labels = {'regular': 'Obychnyy', 'early_full': 'Dosrochnoe polnoe', 'early_partial': 'Dosrochnoe chastichnoe'}
+        story.append(Spacer(1, 6))
+        story.append(Paragraph('История платежей', sub_style))
+        pay_data = [['Дата', 'Сумма', 'Осн. долг', 'Проценты', 'Штрафы', 'Тип']]
+        type_labels = {'regular': 'Обычный', 'early_full': 'Досрочное полное', 'early_partial': 'Досрочное частичное'}
         for p in payments:
             pay_data.append([
-                fmt_date(p.get('payment_date')),
-                fmt_money(p.get('amount', 0)),
-                fmt_money(p.get('principal_part', 0)),
-                fmt_money(p.get('interest_part', 0)),
+                fmt_date(p.get('payment_date')), fmt_money(p.get('amount', 0)),
+                fmt_money(p.get('principal_part', 0)), fmt_money(p.get('interest_part', 0)),
                 fmt_money(p.get('penalty_part', 0)),
                 type_labels.get(p.get('payment_type', ''), p.get('payment_type', '')),
             ])
-        pt = Table(pay_data, colWidths=[70, 85, 85, 85, 85, 120])
+        pt = Table(pay_data, colWidths=[58, 68, 68, 60, 60, 100], repeatRows=1)
         pt.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E2EFDA')),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dce6f0')),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
             ('ALIGN', (1, 0), (4, -1), 'RIGHT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fb')]),
         ]))
         story.append(pt)
 
-    story.append(Spacer(1, 15))
-    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
 
     doc.build(story)
     return buf.getvalue()
@@ -1422,50 +1440,76 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name):
     return buf.getvalue()
 
 def generate_savings_pdf(saving, schedule, transactions, member_name):
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+    font_r, font_b = register_cyrillic_font()
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph('Vyipiska po dogovoru sberezheniy %s' % saving.get('contract_no', ''), ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, spaceAfter=6)))
+    title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
+    sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
+    footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
+
+    story.append(Paragraph('Выписка по договору сбережений %s' % saving.get('contract_no', ''), title_style))
+    story.append(Spacer(1, 4))
 
     info = [
-        ['Payschik:', member_name, 'Summa:', '%s rub.' % fmt_money(saving.get('amount'))],
-        ['Stavka:', '%s%%' % saving.get('rate', ''), 'Srok:', '%s mes.' % saving.get('term_months', '')],
-        ['Period:', '%s - %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Nachisleno:', '%s rub.' % fmt_money(saving.get('accrued_interest'))],
+        ['Пайщик:', member_name, 'Сумма:', '%s руб.' % fmt_money(saving.get('amount'))],
+        ['Ставка:', '%s%% годовых' % saving.get('rate', ''), 'Срок:', '%s мес.' % saving.get('term_months', '')],
+        ['Период:', '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date'))), 'Начислено:', '%s руб.' % fmt_money(saving.get('accrued_interest'))],
     ]
-    it = Table(info, colWidths=[70, 180, 70, 180])
-    it.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9), ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'), ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    it = Table(info, colWidths=[55, 150, 60, 150])
+    it.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (2, 0), (2, -1), font_b),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2), ('TOPPADDING', (0, 0), (-1, -1), 1),
+    ]))
     story.append(it)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 6))
 
-    story.append(Paragraph('Grafik dokhodnosti', ParagraphStyle('SH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
-    sdata = [['N', 'Nachalo', 'Okonchanie', 'Protsenty', 'Nakopleno', 'Balans']]
+    story.append(Paragraph('График доходности', sub_style))
+    sdata = [['№', 'Начало', 'Окончание', 'Проценты', 'Накоплено', 'Баланс']]
     for item in schedule:
-        sdata.append([str(item.get('period_no', '')), fmt_date(item.get('period_start')), fmt_date(item.get('period_end')), fmt_money(item.get('interest_amount', 0)), fmt_money(item.get('cumulative_interest', 0)), fmt_money(item.get('balance_after', 0))])
-    st = Table(sdata, colWidths=[30, 80, 80, 85, 85, 85])
-    st.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D6EAF8')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (3, 0), (-1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+        sdata.append([str(item.get('period_no', '')), fmt_date(item.get('period_start')), fmt_date(item.get('period_end')),
+                       fmt_money(item.get('interest_amount', 0)), fmt_money(item.get('cumulative_interest', 0)), fmt_money(item.get('balance_after', 0))])
+    st = Table(sdata, colWidths=[22, 68, 68, 75, 75, 85], repeatRows=1)
+    st.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d6eaf8')),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'), ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f6fc')]),
+    ]))
     story.append(st)
 
     if transactions:
-        story.append(Spacer(1, 10))
-        story.append(Paragraph('Operatsii', ParagraphStyle('TH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
-        tdata = [['Data', 'Summa', 'Tip', 'Opisanie']]
-        type_labels = {'deposit': 'Popolnenie', 'withdrawal': 'Snyatie', 'interest_payout': 'Vyplata %', 'early_close': 'Dosrochnoe zakrytie'}
+        story.append(Spacer(1, 6))
+        story.append(Paragraph('Операции', sub_style))
+        tdata = [['Дата', 'Сумма', 'Тип', 'Описание']]
+        type_labels = {'deposit': 'Пополнение', 'withdrawal': 'Снятие', 'interest_payout': 'Выплата %', 'early_close': 'Досрочное закрытие'}
         for t in transactions:
-            tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)), type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
-        tt = Table(tdata, colWidths=[70, 85, 120, 200])
-        tt.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D6EAF8')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+            tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
+                           type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
+        tt = Table(tdata, colWidths=[58, 68, 100, 170], repeatRows=1)
+        tt.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d6eaf8')),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f6fc')]),
+        ]))
         story.append(tt)
 
-    story.append(Spacer(1, 15))
-    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('F', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
     doc.build(story)
     return buf.getvalue()
 
@@ -1541,29 +1585,49 @@ def generate_shares_pdf(account, transactions, member_name):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+    font_r, font_b = register_cyrillic_font()
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12*mm, rightMargin=12*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph('Vyipiska po paevomu schyotu %s' % account.get('account_no', ''), ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, spaceAfter=6)))
-    info = [['Payschik:', member_name], ['Balans:', '%s rub.' % fmt_money(account.get('balance'))], ['Vneseno:', '%s rub.' % fmt_money(account.get('total_in'))], ['Vyplacheno:', '%s rub.' % fmt_money(account.get('total_out'))]]
-    it = Table(info, colWidths=[80, 200])
-    it.setStyle(TableStyle([('FONTSIZE', (0, 0), (-1, -1), 9), ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
-    story.append(it)
-    story.append(Spacer(1, 10))
+    title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=4, textColor=colors.HexColor('#1a3c5e'))
+    sub_style = ParagraphStyle('S', fontName=font_b, fontSize=10, spaceAfter=4, spaceBefore=8, textColor=colors.HexColor('#2e5d8a'))
+    footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
 
-    story.append(Paragraph('Operatsii', ParagraphStyle('OH', parent=styles['Heading2'], fontSize=11, spaceAfter=4)))
-    tdata = [['Data', 'Summa', 'Tip', 'Opisanie']]
-    type_labels = {'in': 'Vnesenie', 'out': 'Vyplata'}
+    story.append(Paragraph('Выписка по паевому счёту %s' % account.get('account_no', ''), title_style))
+    story.append(Spacer(1, 4))
+
+    info = [['Пайщик:', member_name], ['Баланс:', '%s руб.' % fmt_money(account.get('balance'))],
+            ['Внесено:', '%s руб.' % fmt_money(account.get('total_in'))], ['Выплачено:', '%s руб.' % fmt_money(account.get('total_out'))]]
+    it = Table(info, colWidths=[70, 200])
+    it.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('FONTNAME', (0, 0), (0, -1), font_b),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2), ('TOPPADDING', (0, 0), (-1, -1), 1),
+    ]))
+    story.append(it)
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Операции', sub_style))
+    tdata = [['Дата', 'Сумма', 'Тип', 'Описание']]
+    type_labels = {'in': 'Внесение', 'out': 'Выплата'}
     for t in transactions:
-        tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)), type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
-    tt = Table(tdata, colWidths=[70, 85, 100, 200])
-    tt.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FCE4D6')), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, -1), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+        tdata.append([fmt_date(t.get('transaction_date')), fmt_money(t.get('amount', 0)),
+                       type_labels.get(t.get('transaction_type', ''), t.get('transaction_type', '')), t.get('description', '')])
+    tt = Table(tdata, colWidths=[58, 68, 85, 200], repeatRows=1)
+    tt.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), font_r), ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('FONTNAME', (0, 0), (-1, 0), font_b), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#fce4d6')),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#b0b0b0')),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fef5ef')]),
+    ]))
     story.append(tt)
 
-    story.append(Spacer(1, 15))
-    story.append(Paragraph('Data formirovaniya: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), ParagraphStyle('F', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
     doc.build(story)
     return buf.getvalue()
 
