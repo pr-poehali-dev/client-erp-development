@@ -2002,9 +2002,9 @@ def handle_auth(method, body, cur, conn):
     return {'error': 'Неизвестное действие'}
 
 def handle_cabinet(method, params, body, headers, cur):
-    token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
+    token = params.get('token') or body.get('token', '')
     if not token:
-        token = params.get('token') or body.get('token', '')
+        token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
 
     cur.execute("SELECT u.id, u.member_id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
     row = cur.fetchone()
@@ -2080,7 +2080,7 @@ def handle_audit(params, staff, cur):
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit'}
 
 def handler(event, context):
-    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, личный кабинет, авторизация"""
+    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
