@@ -1172,6 +1172,35 @@ def build_pdf_header(font_r, font_b):
 
     return [header, Spacer(1, 3), line, Spacer(1, 8)]
 
+def build_xlsx_header(ws):
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.drawing.image import Image as XlImage
+    logo_path = get_logo_path()
+    img = XlImage(logo_path)
+    img.width = 80
+    img.height = 80
+    ws.add_image(img, 'A1')
+    ws.row_dimensions[1].height = 20
+    ws.row_dimensions[2].height = 20
+    ws.row_dimensions[3].height = 15
+    ws.row_dimensions[4].height = 15
+    ws.row_dimensions[5].height = 12
+    ws.merge_cells('B1:F2')
+    ws['B1'] = 'КПК «ЭКСПЕРТ ФИНАНС»'
+    ws['B1'].font = Font(bold=True, size=14, color='1a3c5e')
+    ws['B1'].alignment = Alignment(vertical='center')
+    ws['B3'] = 'Работаем с финансами, думаем о людях'
+    ws['B3'].font = Font(italic=True, size=8, color='888888')
+    ws['B4'] = 'Тел: 8 (800) 700-89-09'
+    ws['B4'].font = Font(bold=True, size=9, color='333333')
+    ws['B5'] = 'Сайт: nfofinans.ru    Email: info@sll-expert.ru    Telegram: @nfofinans_161    WhatsApp: +79613032756'
+    ws['B5'].font = Font(size=7, color='555555')
+    line_border = Border(bottom=Side(style='medium', color='2e5d8a'))
+    for col in range(1, 8):
+        ws.cell(row=6, column=col).border = line_border
+    ws.row_dimensions[6].height = 5
+    return 8
+
 def generate_loan_xlsx(loan, schedule, payments, member_name):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -1186,32 +1215,42 @@ def generate_loan_xlsx(loan, schedule, payments, member_name):
     title_font = Font(bold=True, size=14)
     header_fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
 
-    ws.merge_cells('A1:F1')
-    ws['A1'] = 'Выписка по договору займа %s' % loan.get('contract_no', '')
-    ws['A1'].font = title_font
+    row = build_xlsx_header(ws)
 
-    ws['A3'] = 'Пайщик:'
-    ws['B3'] = member_name
-    ws['A3'].font = Font(bold=True)
-    ws['A4'] = 'Сумма займа:'
-    ws['B4'] = '%s руб.' % fmt_money(loan.get('amount'))
-    ws['A4'].font = Font(bold=True)
-    ws['A5'] = 'Ставка:'
-    ws['B5'] = '%s%% годовых' % loan.get('rate', '')
-    ws['A5'].font = Font(bold=True)
-    ws['A6'] = 'Срок:'
-    ws['B6'] = '%s мес.' % loan.get('term_months', '')
-    ws['A6'].font = Font(bold=True)
-    ws['A7'] = 'Период:'
-    ws['B7'] = '%s — %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date')))
-    ws['A7'].font = Font(bold=True)
-    ws['A8'] = 'Остаток:'
-    ws['B8'] = '%s руб.' % fmt_money(loan.get('balance'))
-    ws['A8'].font = Font(bold=True)
-    ws['A9'] = 'Статус:'
+    ws.merge_cells('A%d:F%d' % (row, row))
+    ws['A%d' % row] = 'Выписка по договору займа %s' % loan.get('contract_no', '')
+    ws['A%d' % row].font = title_font
+    row += 2
+
+    ws['A%d' % row] = 'Пайщик:'
+    ws['B%d' % row] = member_name
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Сумма займа:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(loan.get('amount'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Ставка:'
+    ws['B%d' % row] = '%s%% годовых' % loan.get('rate', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Срок:'
+    ws['B%d' % row] = '%s мес.' % loan.get('term_months', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Период:'
+    ws['B%d' % row] = '%s — %s' % (fmt_date(loan.get('start_date')), fmt_date(loan.get('end_date')))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Остаток:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(loan.get('balance'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Статус:'
     status_map = {'active': 'Активен', 'closed': 'Закрыт', 'overdue': 'Просрочен'}
-    ws['B9'] = status_map.get(loan.get('status', ''), loan.get('status', ''))
-    ws['A9'].font = Font(bold=True)
+    ws['B%d' % row] = status_map.get(loan.get('status', ''), loan.get('status', ''))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 2
 
     ws.column_dimensions['A'].width = 18
     ws.column_dimensions['B'].width = 20
@@ -1221,7 +1260,6 @@ def generate_loan_xlsx(loan, schedule, payments, member_name):
     ws.column_dimensions['F'].width = 18
     ws.column_dimensions['G'].width = 14
 
-    row = 11
     ws.merge_cells('A%d:G%d' % (row, row))
     ws['A%d' % row] = 'ГРАФИК ПЛАТЕЖЕЙ'
     ws['A%d' % row].font = Font(bold=True, size=12)
@@ -1413,28 +1451,37 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name):
     header_font = Font(bold=True, size=11)
     header_fill = PatternFill(start_color='D6EAF8', end_color='D6EAF8', fill_type='solid')
 
-    ws.merge_cells('A1:F1')
-    ws['A1'] = 'Выписка по договору сбережений %s' % saving.get('contract_no', '')
-    ws['A1'].font = Font(bold=True, size=14)
+    row = build_xlsx_header(ws)
 
-    ws['A3'] = 'Пайщик:'
-    ws['B3'] = member_name
-    ws['A3'].font = Font(bold=True)
-    ws['A4'] = 'Сумма вклада:'
-    ws['B4'] = '%s руб.' % fmt_money(saving.get('amount'))
-    ws['A4'].font = Font(bold=True)
-    ws['A5'] = 'Ставка:'
-    ws['B5'] = '%s%% годовых' % saving.get('rate', '')
-    ws['A5'].font = Font(bold=True)
-    ws['A6'] = 'Срок:'
-    ws['B6'] = '%s мес.' % saving.get('term_months', '')
-    ws['A6'].font = Font(bold=True)
-    ws['A7'] = 'Период:'
-    ws['B7'] = '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date')))
-    ws['A7'].font = Font(bold=True)
-    ws['A8'] = 'Начислено %:'
-    ws['B8'] = '%s руб.' % fmt_money(saving.get('accrued_interest'))
-    ws['A8'].font = Font(bold=True)
+    ws.merge_cells('A%d:F%d' % (row, row))
+    ws['A%d' % row] = 'Выписка по договору сбережений %s' % saving.get('contract_no', '')
+    ws['A%d' % row].font = Font(bold=True, size=14)
+    row += 2
+
+    ws['A%d' % row] = 'Пайщик:'
+    ws['B%d' % row] = member_name
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Сумма вклада:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('amount'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Ставка:'
+    ws['B%d' % row] = '%s%% годовых' % saving.get('rate', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Срок:'
+    ws['B%d' % row] = '%s мес.' % saving.get('term_months', '')
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Период:'
+    ws['B%d' % row] = '%s — %s' % (fmt_date(saving.get('start_date')), fmt_date(saving.get('end_date')))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Начислено %:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(saving.get('accrued_interest'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 2
 
     ws.column_dimensions['A'].width = 18
     ws.column_dimensions['B'].width = 20
@@ -1442,7 +1489,6 @@ def generate_savings_xlsx(saving, schedule, transactions, member_name):
     ws.column_dimensions['D'].width = 18
     ws.column_dimensions['E'].width = 18
 
-    row = 10
     ws['A%d' % row] = 'ГРАФИК ДОХОДНОСТИ'
     ws['A%d' % row].font = Font(bold=True, size=12)
     row += 1
@@ -1586,29 +1632,35 @@ def generate_shares_xlsx(account, transactions, member_name):
     header_font = Font(bold=True, size=11)
     header_fill = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
 
-    ws.merge_cells('A1:D1')
-    ws['A1'] = 'Выписка по паевому счёту %s' % account.get('account_no', '')
-    ws['A1'].font = Font(bold=True, size=14)
+    row = build_xlsx_header(ws)
 
-    ws['A3'] = 'Пайщик:'
-    ws['B3'] = member_name
-    ws['A3'].font = Font(bold=True)
-    ws['A4'] = 'Баланс:'
-    ws['B4'] = '%s руб.' % fmt_money(account.get('balance'))
-    ws['A4'].font = Font(bold=True)
-    ws['A5'] = 'Внесено:'
-    ws['B5'] = '%s руб.' % fmt_money(account.get('total_in'))
-    ws['A5'].font = Font(bold=True)
-    ws['A6'] = 'Выплачено:'
-    ws['B6'] = '%s руб.' % fmt_money(account.get('total_out'))
-    ws['A6'].font = Font(bold=True)
+    ws.merge_cells('A%d:D%d' % (row, row))
+    ws['A%d' % row] = 'Выписка по паевому счёту %s' % account.get('account_no', '')
+    ws['A%d' % row].font = Font(bold=True, size=14)
+    row += 2
+
+    ws['A%d' % row] = 'Пайщик:'
+    ws['B%d' % row] = member_name
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Баланс:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(account.get('balance'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Внесено:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(account.get('total_in'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 1
+    ws['A%d' % row] = 'Выплачено:'
+    ws['B%d' % row] = '%s руб.' % fmt_money(account.get('total_out'))
+    ws['A%d' % row].font = Font(bold=True)
+    row += 2
 
     ws.column_dimensions['A'].width = 18
     ws.column_dimensions['B'].width = 20
     ws.column_dimensions['C'].width = 18
     ws.column_dimensions['D'].width = 30
 
-    row = 8
     ws['A%d' % row] = 'ОПЕРАЦИИ'
     ws['A%d' % row].font = Font(bold=True, size=12)
     row += 1
