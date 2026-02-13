@@ -4,6 +4,10 @@ const API_URL = funcUrls.api;
 
 type Params = Record<string, string | number | undefined>;
 
+function getStaffToken(): string {
+  return localStorage.getItem("staff_token") || "";
+}
+
 async function request<T>(method: string, params?: Params, body?: unknown): Promise<T> {
   const url = new URL(API_URL);
   if (params) {
@@ -12,10 +16,11 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
     });
   }
 
-  const options: RequestInit = {
-    method,
-    headers: { "Content-Type": "application/json" },
-  };
+  const hdrs: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getStaffToken();
+  if (token) hdrs["X-Auth-Token"] = token;
+
+  const options: RequestInit = { method, headers: hdrs };
   if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url.toString(), options);
@@ -103,6 +108,23 @@ export const api = {
     overview: (token: string) => request<CabinetOverview>("GET", { entity: "cabinet", action: "overview", token }),
     loanDetail: (token: string, id: number) => request<LoanDetail>("GET", { entity: "cabinet", action: "loan_detail", token, id }),
     savingDetail: (token: string, id: number) => request<CabinetSavingDetail>("GET", { entity: "cabinet", action: "saving_detail", token, id }),
+  },
+
+  staffAuth: {
+    login: (login: string, password: string) => request<StaffLoginResult>("POST", undefined, { entity: "staff_auth", action: "login", login, password }),
+    check: (token: string) => request<StaffLoginResult>("POST", undefined, { entity: "staff_auth", action: "check", token }),
+    logout: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "staff_auth", action: "logout", token }),
+    changePassword: (token: string, oldPassword: string, newPassword: string) => request<{ success: boolean }>("POST", undefined, { entity: "staff_auth", action: "change_password", token, old_password: oldPassword, new_password: newPassword }),
+  },
+
+  users: {
+    list: () => request<StaffUser[]>("GET", { entity: "users" }),
+    get: (id: number) => request<StaffUser>("GET", { entity: "users", id }),
+    create: (data: { login: string; name: string; role: string; password: string; email?: string; phone?: string }) =>
+      request<{ id: number; login: string }>("POST", undefined, { entity: "users", action: "create", ...data }),
+    update: (data: { id: number; name?: string; role?: string; login?: string; email?: string; phone?: string; password?: string; status?: string }) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "users", action: "update", ...data }),
+    delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "users", action: "delete", id }),
   },
 };
 
@@ -342,6 +364,26 @@ export interface CabinetOverview {
 
 export interface CabinetSavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
+}
+
+export interface StaffLoginResult {
+  success: boolean;
+  token?: string;
+  user?: { name: string; role: string; login: string };
+  error?: string;
+}
+
+export interface StaffUser {
+  id: number;
+  login: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  status: string;
+  member_id: number | null;
+  last_login: string | null;
+  created_at: string;
 }
 
 export default api;

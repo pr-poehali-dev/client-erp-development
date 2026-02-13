@@ -1120,6 +1120,137 @@ def get_session_user(headers, cur):
         return None
     return {'user_id': row[0], 'member_id': row[1], 'name': row[2], 'phone': row[3], 'role': row[4]}
 
+def get_staff_session(params, headers, cur):
+    token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
+    if not token:
+        token = params.get('staff_token', '')
+    if not token:
+        return None
+    cur.execute("SELECT cs.user_id, u.name, u.role, u.login FROM client_sessions cs JOIN users u ON u.id=cs.user_id WHERE cs.token='%s' AND cs.expires_at > NOW() AND u.role IN ('admin','manager')" % esc(token))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {'user_id': row[0], 'name': row[1], 'role': row[2], 'login': row[3]}
+
+def handle_staff_auth(body, cur, conn):
+    action = body.get('action', '')
+
+    if action == 'login':
+        login = body.get('login', '').strip()
+        password = body.get('password', '')
+        if not login or not password:
+            return {'error': 'Введите логин и пароль'}
+        pw_hash = hash_password(password)
+        cur.execute("SELECT id, name, role, login FROM users WHERE login='%s' AND password_hash='%s' AND role IN ('admin','manager') AND status='active'" % (esc(login), pw_hash))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Неверный логин или пароль'}
+        user_id, name, role, ulogin = row
+        token = generate_token()
+        expires = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("INSERT INTO client_sessions (user_id, token, expires_at) VALUES (%s,'%s','%s')" % (user_id, token, expires))
+        cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s" % user_id)
+        conn.commit()
+        return {'success': True, 'token': token, 'user': {'name': name, 'role': role, 'login': ulogin}}
+
+    if action == 'check':
+        token = body.get('token', '')
+        cur.execute("SELECT u.id, u.name, u.role, u.login FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at > NOW() AND u.role IN ('admin','manager')" % esc(token))
+        row = cur.fetchone()
+        if not row:
+            return {'_status': 401, 'error': 'Не авторизован'}
+        return {'success': True, 'user': {'name': row[1], 'role': row[2], 'login': row[3]}}
+
+    if action == 'logout':
+        token = body.get('token', '')
+        cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE token='%s'" % esc(token))
+        conn.commit()
+        return {'success': True}
+
+    if action == 'change_password':
+        token = body.get('token', '')
+        old_pw = body.get('old_password', '')
+        new_pw = body.get('new_password', '')
+        if not new_pw or len(new_pw) < 6:
+            return {'error': 'Новый пароль не менее 6 символов'}
+        cur.execute("SELECT cs.user_id FROM client_sessions cs WHERE cs.token='%s' AND cs.expires_at > NOW()" % esc(token))
+        row = cur.fetchone()
+        if not row:
+            return {'_status': 401, 'error': 'Сессия истекла'}
+        user_id = row[0]
+        cur.execute("SELECT password_hash FROM users WHERE id=%s" % user_id)
+        cur_hash = cur.fetchone()[0]
+        if cur_hash and cur_hash != hash_password(old_pw):
+            return {'error': 'Неверный текущий пароль'}
+        cur.execute("UPDATE users SET password_hash='%s' WHERE id=%s" % (hash_password(new_pw), user_id))
+        conn.commit()
+        return {'success': True}
+
+    return {'error': 'Неизвестное действие'}
+
+def handle_users(method, params, body, staff, cur, conn):
+    if staff['role'] != 'admin':
+        return {'_status': 403, 'error': 'Только администратор может управлять пользователями'}
+
+    if method == 'GET':
+        user_id = params.get('id')
+        if user_id:
+            return query_one(cur, "SELECT id, login, name, email, phone, role, status, member_id, last_login, created_at FROM users WHERE id=%s" % user_id)
+        return query_rows(cur, "SELECT id, login, name, email, phone, role, status, member_id, last_login, created_at FROM users ORDER BY created_at DESC")
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+        if action == 'create':
+            login = body.get('login', '').strip()
+            name = body.get('name', '').strip()
+            role = body.get('role', 'manager')
+            password = body.get('password', '')
+            email = body.get('email', '')
+            phone = body.get('phone', '')
+            if not login or not name:
+                return {'error': 'Логин и имя обязательны'}
+            if role not in ('admin', 'manager'):
+                return {'error': 'Роль должна быть admin или manager'}
+            if not password or len(password) < 6:
+                return {'error': 'Пароль не менее 6 символов'}
+            cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
+            if cur.fetchone():
+                return {'error': 'Логин уже занят'}
+            pw_hash = hash_password(password)
+            cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash) VALUES ('%s','%s','%s','%s','%s','%s') RETURNING id" % (esc(login), esc(name), esc(email), esc(phone), role, pw_hash))
+            uid = cur.fetchone()[0]
+            conn.commit()
+            return {'id': uid, 'login': login}
+        elif action == 'update':
+            uid = body.get('id')
+            if not uid:
+                return {'error': 'Укажите id'}
+            updates = []
+            for f in ['name', 'email', 'phone', 'role', 'status', 'login']:
+                if f in body and body[f] is not None:
+                    if f == 'role' and body[f] not in ('admin', 'manager', 'client'):
+                        return {'error': 'Недопустимая роль'}
+                    updates.append("%s='%s'" % (f, esc(body[f])))
+            if body.get('password'):
+                if len(body['password']) < 6:
+                    return {'error': 'Пароль не менее 6 символов'}
+                updates.append("password_hash='%s'" % hash_password(body['password']))
+            if updates:
+                cur.execute("UPDATE users SET %s WHERE id=%s" % (', '.join(updates), uid))
+                conn.commit()
+            return {'success': True}
+        elif action == 'delete':
+            uid = body.get('id')
+            if not uid:
+                return {'error': 'Укажите id'}
+            if int(uid) == staff['user_id']:
+                return {'error': 'Нельзя удалить самого себя'}
+            cur.execute("UPDATE users SET status='blocked' WHERE id=%s" % uid)
+            cur.execute("UPDATE client_sessions SET expires_at=NOW() WHERE user_id=%s" % uid)
+            conn.commit()
+            return {'success': True}
+    return {'error': 'Неизвестное действие'}
+
 def handle_auth(method, body, cur, conn):
     action = body.get('action', '')
 
@@ -1327,15 +1458,18 @@ def handle_cabinet(method, params, body, headers, cur):
 
     return {'error': 'Неизвестное действие'}
 
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users'}
+
 def handler(event, context):
-    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, личный кабинет"""
+    """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, личный кабинет, авторизация"""
     if event.get('httpMethod') == 'OPTIONS':
-        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
+        return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
     headers = {'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}
     method = event.get('httpMethod', 'GET')
     params = event.get('queryStringParameters') or {}
     body = json.loads(event.get('body', '{}')) if event.get('body') else {}
+    ev_headers = event.get('headers') or {}
 
     entity = params.get('entity') or body.get('entity', 'dashboard')
 
@@ -1343,6 +1477,20 @@ def handler(event, context):
     cur = conn.cursor()
 
     try:
+        if entity in PROTECTED_ENTITIES:
+            staff = get_staff_session(params, ev_headers, cur)
+            if not staff:
+                return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Требуется авторизация'})}
+
+            if staff['role'] == 'manager':
+                if method == 'DELETE':
+                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
+                if entity == 'users':
+                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Недостаточно прав'})}
+                action = params.get('action') or body.get('action', '')
+                if action == 'delete':
+                    return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
+
         if entity == 'dashboard':
             result = handle_dashboard(cur)
         elif entity == 'members':
@@ -1355,16 +1503,20 @@ def handler(event, context):
             result = handle_shares(method, params, body, cur, conn)
         elif entity == 'export':
             result = handle_export(params, cur)
+        elif entity == 'users':
+            result = handle_users(method, params, body, staff, cur, conn)
+        elif entity == 'staff_auth':
+            result = handle_staff_auth(body, cur, conn)
         elif entity == 'auth':
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
-            ev_headers = event.get('headers') or {}
             result = handle_cabinet(method, params, body, ev_headers, cur)
-            if isinstance(result, dict) and '_status' in result:
-                st = result.pop('_status')
-                return {'statusCode': st, 'headers': headers, 'body': json.dumps(result)}
         else:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Unknown entity: %s' % entity})}
+
+        if isinstance(result, dict) and '_status' in result:
+            st = result.pop('_status')
+            return {'statusCode': st, 'headers': headers, 'body': json.dumps(result)}
 
         if result is None:
             return {'statusCode': 404, 'headers': headers, 'body': json.dumps({'error': 'Не найдено'})}

@@ -1,0 +1,4 @@
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login VARCHAR(100);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login ON users(login) WHERE login IS NOT NULL;

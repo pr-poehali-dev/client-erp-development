@@ -2,21 +2,32 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
-const menuItems = [
-  { icon: "LayoutDashboard", label: "Дашборд", path: "/" },
-  { icon: "Users", label: "Пайщики", path: "/members" },
-  { icon: "Landmark", label: "Займы", path: "/loans" },
-  { icon: "PiggyBank", label: "Сбережения", path: "/savings" },
-  { icon: "Wallet", label: "Паевые счета", path: "/shares" },
-  { icon: "BarChart3", label: "Отчётность", path: "/reports" },
-  { icon: "Settings", label: "Администрирование", path: "/admin" },
+const allMenuItems = [
+  { icon: "LayoutDashboard", label: "Дашборд", path: "/", roles: ["admin", "manager"] },
+  { icon: "Users", label: "Пайщики", path: "/members", roles: ["admin", "manager"] },
+  { icon: "Landmark", label: "Займы", path: "/loans", roles: ["admin", "manager"] },
+  { icon: "PiggyBank", label: "Сбережения", path: "/savings", roles: ["admin", "manager"] },
+  { icon: "Wallet", label: "Паевые счета", path: "/shares", roles: ["admin", "manager"] },
+  { icon: "BarChart3", label: "Отчётность", path: "/reports", roles: ["admin", "manager"] },
+  { icon: "Settings", label: "Администрирование", path: "/admin", roles: ["admin"] },
 ];
+
+const roleLabels: Record<string, string> = { admin: "Администратор", manager: "Менеджер" };
 
 const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
+
+  const menuItems = allMenuItems.filter((item) => user && item.roles.includes(user.role));
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
 
   return (
     <aside
@@ -60,12 +71,25 @@ const Sidebar = () => {
       </nav>
 
       <div className="p-2 border-t border-sidebar-border space-y-1">
+        {user && !collapsed && (
+          <div className="px-3 py-2 text-xs">
+            <div className="font-medium text-sidebar-foreground/90 truncate">{user.name}</div>
+            <div className="text-sidebar-foreground/50">{roleLabels[user.role] || user.role}</div>
+          </div>
+        )}
         <button
           onClick={() => navigate("/cabinet/login")}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm transition-all"
         >
           <Icon name="ExternalLink" size={18} className="flex-shrink-0" />
           {!collapsed && <span>Личный кабинет</span>}
+        </button>
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/50 hover:text-red-400 hover:bg-sidebar-accent text-sm transition-all"
+        >
+          <Icon name="LogOut" size={18} className="flex-shrink-0" />
+          {!collapsed && <span>Выйти</span>}
         </button>
         <button
           onClick={() => setCollapsed(!collapsed)}

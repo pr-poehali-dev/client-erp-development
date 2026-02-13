@@ -1,1 +1,11 @@
-{"tests": [{"name": "Dashboard stats", "method": "GET", "path": "/?entity=dashboard", "expectedStatus": 200}, {"name": "List members", "method": "GET", "path": "/?entity=members", "expectedStatus": 200}, {"name": "List loans", "method": "GET", "path": "/?entity=loans", "expectedStatus": 200}, {"name": "Calculate loan schedule", "method": "GET", "path": "/?entity=loans&action=schedule&amount=500000&rate=18&term=12&schedule_type=annuity&start_date=2025-01-01", "expectedStatus": 200}, {"name": "List savings", "method": "GET", "path": "/?entity=savings", "expectedStatus": 200}, {"name": "List shares", "method": "GET", "path": "/?entity=shares", "expectedStatus": 200}, {"name": "Export missing id returns 404", "method": "GET", "path": "/?entity=export&type=loan&format=xlsx", "expectedStatus": 404}, {"name": "Auth send SMS no phone", "method": "POST", "path": "/", "body": {"entity": "auth", "action": "send_sms", "phone": ""}, "expectedStatus": 400}, {"name": "Cabinet unauthorized", "method": "GET", "path": "/?entity=cabinet&action=overview&token=invalid", "expectedStatus": 401}, {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200}]}
+{"tests": [
+  {"name": "Dashboard requires auth", "method": "GET", "path": "/?entity=dashboard", "expectedStatus": 401},
+  {"name": "Members requires auth", "method": "GET", "path": "/?entity=members", "expectedStatus": 401},
+  {"name": "Loans requires auth", "method": "GET", "path": "/?entity=loans", "expectedStatus": 401},
+  {"name": "Staff login empty creds", "method": "POST", "path": "/", "body": {"entity": "staff_auth", "action": "login", "login": "", "password": ""}, "expectedStatus": 400},
+  {"name": "Staff login wrong password", "method": "POST", "path": "/", "body": {"entity": "staff_auth", "action": "login", "login": "admin", "password": "wrong"}, "expectedStatus": 400},
+  {"name": "Staff auth check invalid", "method": "POST", "path": "/", "body": {"entity": "staff_auth", "action": "check", "token": "invalid"}, "expectedStatus": 401},
+  {"name": "Auth send SMS no phone", "method": "POST", "path": "/", "body": {"entity": "auth", "action": "send_sms", "phone": ""}, "expectedStatus": 400},
+  {"name": "Cabinet unauthorized", "method": "GET", "path": "/?entity=cabinet&action=overview&token=invalid", "expectedStatus": 401},
+  {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200}
+]}

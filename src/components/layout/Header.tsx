@@ -1,8 +1,12 @@
 import Icon from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
+
+const roleLabels: Record<string, string> = { admin: "Администратор", manager: "Менеджер" };
 
 const Header = () => {
+  const { user } = useAuth();
+
   return (
     <header className="h-16 border-b bg-card flex items-center justify-between px-6 sticky top-0 z-10">
       <div className="flex items-center gap-4 flex-1">
@@ -15,21 +19,13 @@ const Header = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="relative">
-          <Icon name="Bell" size={20} className="text-muted-foreground" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
-        </Button>
-        <div className="w-px h-8 bg-border mx-2" />
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <Icon name="User" size={16} className="text-primary" />
-          </div>
-          <div className="text-sm">
-            <div className="font-medium">Администратор</div>
-            <div className="text-xs text-muted-foreground">admin@kpk.ru</div>
-          </div>
-          <Icon name="ChevronDown" size={16} className="text-muted-foreground" />
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+          <Icon name="User" size={16} className="text-primary" />
+        </div>
+        <div className="text-sm">
+          <div className="font-medium">{user?.name || "—"}</div>
+          <div className="text-xs text-muted-foreground">{roleLabels[user?.role || ""] || user?.role}</div>
         </div>
       </div>
     </header>
