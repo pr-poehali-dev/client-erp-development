@@ -2255,7 +2255,25 @@ def handle_audit(params, staff, cur):
     rows = query_rows(cur, "SELECT * FROM audit_log%s ORDER BY created_at DESC LIMIT %s OFFSET %s" % (where_sql, limit, offset))
     return {'items': rows, 'total': total}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit'}
+def handle_org_settings(method, body, staff, cur, conn):
+    if staff['role'] != 'admin':
+        return {'_status': 403, 'error': 'Только администратор может управлять настройками'}
+    if method == 'GET':
+        cur.execute("SELECT key, value FROM organization_settings ORDER BY id")
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows}
+    elif method == 'POST':
+        data = body.get('settings', {})
+        allowed = ('name', 'inn', 'ogrn', 'director_fio', 'bank_name', 'bik', 'rs')
+        for k, v in data.items():
+            if k in allowed:
+                cur.execute("INSERT INTO organization_settings (key, value, updated_at) VALUES ('%s', '%s', NOW()) ON CONFLICT (key) DO UPDATE SET value='%s', updated_at=NOW()" % (esc(k), esc(v), esc(v)))
+        audit_log(cur, staff, 'update', 'org_settings', None, '', ', '.join(data.keys()), '')
+        conn.commit()
+        return {'success': True}
+    return {'error': 'Неизвестный метод'}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
@@ -2285,7 +2303,7 @@ def handler(event, context):
             if staff['role'] == 'manager':
                 if method == 'DELETE':
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
-                if entity in ('users', 'audit'):
+                if entity in ('users', 'audit', 'org_settings'):
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Недостаточно прав'})}
                 action = params.get('action') or body.get('action', '')
                 if action and 'delete' in action:
@@ -2307,6 +2325,8 @@ def handler(event, context):
             result = handle_users(method, params, body, staff, cur, conn)
         elif entity == 'audit':
             result = handle_audit(params, staff, cur)
+        elif entity == 'org_settings':
+            result = handle_org_settings(method, body, staff, cur, conn)
         elif entity == 'staff_auth':
             result = handle_staff_auth(body, cur, conn, src_ip)
         elif entity == 'auth':

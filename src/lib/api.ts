@@ -167,6 +167,11 @@ export const api = {
     list: (params?: { limit?: number; offset?: number; filter_entity?: string; filter_action?: string }) =>
       request<AuditListResult>("GET", { entity: "audit", ...params }),
   },
+
+  orgSettings: {
+    get: () => request<OrgSettings>("GET", { entity: "org_settings" }),
+    save: (settings: Partial<OrgSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "org_settings", settings }),
+  },
 };
 
 export interface DashboardStats {
@@ -466,6 +471,16 @@ export interface AuditLogEntry {
 export interface AuditListResult {
   items: AuditLogEntry[];
   total: number;
+}
+
+export interface OrgSettings {
+  name: string;
+  inn: string;
+  ogrn: string;
+  director_fio: string;
+  bank_name: string;
+  bik: string;
+  rs: string;
 }
 
 export default api;

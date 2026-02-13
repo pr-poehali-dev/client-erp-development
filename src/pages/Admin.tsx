@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser, AuditLogEntry, Member } from "@/lib/api";
+import api, { StaffUser, AuditLogEntry, Member, OrgSettings } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -64,6 +64,26 @@ const Admin = () => {
   const [auditPage, setAuditPage] = useState(0);
   const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
   const [auditLoading, setAuditLoading] = useState(false);
+  const [orgSettings, setOrgSettings] = useState<OrgSettings>({ name: "", inn: "", ogrn: "", director_fio: "", bank_name: "", bik: "", rs: "" });
+  const [orgLoading, setOrgLoading] = useState(false);
+  const [orgSaving, setOrgSaving] = useState(false);
+
+  const loadOrgSettings = () => {
+    setOrgLoading(true);
+    api.orgSettings.get().then(setOrgSettings).catch(() => {}).finally(() => setOrgLoading(false));
+  };
+
+  const saveOrgSettings = async () => {
+    setOrgSaving(true);
+    try {
+      await api.orgSettings.save(orgSettings);
+      toast({ title: "Настройки сохранены" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setOrgSaving(false);
+    }
+  };
 
   const load = () => {
     setLoading(true);
@@ -229,6 +249,7 @@ const Admin = () => {
           <TabsTrigger value="users">Сотрудники</TabsTrigger>
           <TabsTrigger value="clients">Клиенты ЛК</TabsTrigger>
           <TabsTrigger value="audit" onClick={() => { if (auditLog.length === 0) loadAudit(); }}>Журнал действий</TabsTrigger>
+          <TabsTrigger value="org" onClick={() => { if (!orgSettings.name && !orgLoading) loadOrgSettings(); }}>Организация</TabsTrigger>
           <TabsTrigger value="roles">Роли и права</TabsTrigger>
           <TabsTrigger value="profile">Мой профиль</TabsTrigger>
         </TabsList>
@@ -413,6 +434,72 @@ const Admin = () => {
                 <Icon name="ChevronRight" size={14} />
               </Button>
             </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="org" className="mt-4">
+          {orgLoading ? (
+            <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
+          ) : (
+            <Card className="max-w-2xl">
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Icon name="Building2" size={20} className="text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Реквизиты организации</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">Данные используются в документах и выписках</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Наименование</Label>
+                  <Input value={orgSettings.name} onChange={(e) => setOrgSettings({ ...orgSettings, name: e.target.value })} placeholder='КПК «ЭКСПЕРТ ФИНАНС»' />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">ИНН</Label>
+                    <Input value={orgSettings.inn} onChange={(e) => setOrgSettings({ ...orgSettings, inn: e.target.value })} placeholder="1234567890" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">ОГРН</Label>
+                    <Input value={orgSettings.ogrn} onChange={(e) => setOrgSettings({ ...orgSettings, ogrn: e.target.value })} placeholder="1234567890123" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">ФИО руководителя</Label>
+                  <Input value={orgSettings.director_fio} onChange={(e) => setOrgSettings({ ...orgSettings, director_fio: e.target.value })} placeholder="Иванов Иван Иванович" />
+                </div>
+                <div className="border-t pt-4 mt-4">
+                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <Icon name="Landmark" size={16} className="text-muted-foreground" />
+                    Банковские реквизиты
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium">Наименование банка</Label>
+                      <Input value={orgSettings.bank_name} onChange={(e) => setOrgSettings({ ...orgSettings, bank_name: e.target.value })} placeholder="ПАО Сбербанк" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">БИК</Label>
+                        <Input value={orgSettings.bik} onChange={(e) => setOrgSettings({ ...orgSettings, bik: e.target.value })} placeholder="044525225" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-medium">Расчётный счёт</Label>
+                        <Input value={orgSettings.rs} onChange={(e) => setOrgSettings({ ...orgSettings, rs: e.target.value })} placeholder="40702810000000000000" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <Button onClick={saveOrgSettings} disabled={orgSaving} className="gap-2">
+                  {orgSaving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                  {orgSaving ? "Сохранение..." : "Сохранить"}
+                </Button>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
