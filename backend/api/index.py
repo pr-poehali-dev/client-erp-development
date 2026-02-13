@@ -263,29 +263,48 @@ def handle_loans(method, params, body, cur, conn):
             cur.execute("""
                 SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
-                ORDER BY payment_no LIMIT 1
+                ORDER BY payment_no
             """ % lid)
-            sr = cur.fetchone()
+            schedule_rows = cur.fetchall()
             remaining = amt
             pp = ip = pnp = Decimal('0')
 
-            if sr:
+            for sr in schedule_rows:
+                if remaining <= 0:
+                    break
                 sid, sp, si, spn, spa = sr[0], Decimal(str(sr[1])), Decimal(str(sr[2])), Decimal(str(sr[3])), Decimal(str(sr[4]))
-                if remaining >= sp:
-                    pp = sp; remaining -= sp
-                else:
-                    pp = remaining; remaining = Decimal('0')
+                owed_p = sp - Decimal(str(spa)) if spa < sp else Decimal('0')
+                owed_total = sp + si + spn - Decimal(str(spa))
+                if owed_total <= 0:
+                    continue
+
+                row_pp = row_ip = row_pnp = Decimal('0')
                 if remaining >= si:
-                    ip = si; remaining -= si
+                    row_ip = si; remaining -= si
                 else:
-                    ip = remaining; remaining = Decimal('0')
+                    row_ip = remaining; remaining = Decimal('0')
                 if remaining >= spn:
-                    pnp = spn; remaining -= spn
+                    row_pnp = spn; remaining -= spn
                 else:
-                    pnp = remaining; remaining = Decimal('0')
-                total_paid = spa + amt
-                ns = 'paid' if total_paid >= sp + si + spn else 'partial'
-                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(total_paid), pd, ns, sid))
+                    row_pnp = remaining; remaining = Decimal('0')
+                if remaining >= owed_p:
+                    row_pp = owed_p; remaining -= owed_p
+                else:
+                    row_pp = remaining; remaining = Decimal('0')
+
+                pp += row_pp
+                ip += row_ip
+                pnp += row_pnp
+
+                new_paid = Decimal(str(spa)) + row_pp + row_ip + row_pnp
+                ns = 'paid' if new_paid >= sp + si + spn else 'partial'
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
+
+            if remaining > 0:
+                extra_principal = min(remaining, loan_bal - pp)
+                if extra_principal > 0:
+                    pp += extra_principal
+                    remaining -= extra_principal
 
             cur.execute("""
                 INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, interest_part, penalty_part, payment_type)
