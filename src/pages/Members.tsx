@@ -9,6 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Icon from "@/components/ui/icon";
+import PhoneInput from "@/components/ui/phone-input";
+import AddressSuggest from "@/components/ui/address-suggest";
+import PassportCodeInput from "@/components/ui/passport-code-input";
+import CompanyInnSuggest from "@/components/ui/company-inn-suggest";
 import { useToast } from "@/hooks/use-toast";
 import api, { Member, MemberDetail } from "@/lib/api";
 
@@ -168,15 +172,15 @@ const Members = () => {
               <div className="grid grid-cols-4 gap-3">
                 <div className="space-y-1.5"><Label className="text-xs">Серия</Label><Input value={form.passport_series || ""} onChange={e => setField("passport_series", e.target.value)} maxLength={4} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Номер</Label><Input value={form.passport_number || ""} onChange={e => setField("passport_number", e.target.value)} maxLength={6} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Код подразделения</Label><Input value={form.passport_dept_code || ""} onChange={e => setField("passport_dept_code", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Код подразделения</Label><PassportCodeInput value={form.passport_dept_code || ""} onChange={v => setField("passport_dept_code", v)} onIssuedByChange={v => setField("passport_issued_by", v)} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Дата выдачи</Label><Input type="date" value={form.passport_issue_date || ""} onChange={e => setField("passport_issue_date", e.target.value)} /></div>
               </div>
               <div className="space-y-1.5"><Label className="text-xs">Кем выдан</Label><Input value={form.passport_issued_by || ""} onChange={e => setField("passport_issued_by", e.target.value)} /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Адрес регистрации</Label><Input value={form.registration_address || ""} onChange={e => setField("registration_address", e.target.value)} /></div>
+              <div className="space-y-1.5"><Label className="text-xs">Адрес регистрации</Label><AddressSuggest value={form.registration_address || ""} onChange={v => setField("registration_address", v)} /></div>
 
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактная информация</div>
               <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5"><Label className="text-xs">Телефон *</Label><Input value={form.phone || ""} onChange={e => setField("phone", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Телефон *</Label><PhoneInput value={form.phone || ""} onChange={v => setField("phone", v)} /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Email</Label><Input value={form.email || ""} onChange={e => setField("email", e.target.value)} type="email" /></div>
                 <div className="space-y-1.5"><Label className="text-xs">Telegram</Label><Input value={form.telegram || ""} onChange={e => setField("telegram", e.target.value)} /></div>
               </div>
@@ -200,11 +204,11 @@ const Members = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5"><Label className="text-xs">Доп. телефон</Label><Input value={form.extra_phone || ""} onChange={e => setField("extra_phone", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Доп. телефон</Label><PhoneInput value={form.extra_phone || ""} onChange={v => setField("extra_phone", v)} /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5"><Label className="text-xs">ФИО супруга(и)</Label><Input value={form.spouse_fio || ""} onChange={e => setField("spouse_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон супруга(и)</Label><Input value={form.spouse_phone || ""} onChange={e => setField("spouse_phone", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Телефон супруга(и)</Label><PhoneInput value={form.spouse_phone || ""} onChange={v => setField("spouse_phone", v)} /></div>
               </div>
               <div className="space-y-1.5"><Label className="text-xs">ФИО доп. контакта</Label><Input value={form.extra_contact_fio || ""} onChange={e => setField("extra_contact_fio", e.target.value)} /></div>
 
@@ -231,19 +235,30 @@ const Members = () => {
             </TabsContent>
 
             <TabsContent value="ul" className="space-y-4 mt-4">
-              <div className="space-y-1.5"><Label className="text-xs">ИНН организации *</Label><Input value={form.inn || ""} onChange={e => setField("inn", e.target.value)} maxLength={10} /></div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">ИНН организации *</Label>
+                <CompanyInnSuggest
+                  value={form.inn || ""}
+                  onChange={v => setField("inn", v)}
+                  onCompanySelect={(data) => {
+                    setField("inn", data.inn);
+                    setField("company_name", data.company_name);
+                    setField("director_fio", data.director_fio);
+                  }}
+                />
+              </div>
               <div className="space-y-1.5"><Label className="text-xs">Наименование компании *</Label><Input value={form.company_name || ""} onChange={e => setField("company_name", e.target.value)} /></div>
 
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Руководитель</div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5"><Label className="text-xs">ФИО руководителя</Label><Input value={form.director_fio || ""} onChange={e => setField("director_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон руководителя</Label><Input value={form.director_phone || ""} onChange={e => setField("director_phone", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Телефон руководителя</Label><PhoneInput value={form.director_phone || ""} onChange={v => setField("director_phone", v)} /></div>
               </div>
 
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Контактное лицо</div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5"><Label className="text-xs">ФИО контактного лица</Label><Input value={form.contact_person_fio || ""} onChange={e => setField("contact_person_fio", e.target.value)} /></div>
-                <div className="space-y-1.5"><Label className="text-xs">Телефон контактного лица</Label><Input value={form.contact_person_phone || ""} onChange={e => setField("contact_person_phone", e.target.value)} /></div>
+                <div className="space-y-1.5"><Label className="text-xs">Телефон контактного лица</Label><PhoneInput value={form.contact_person_phone || ""} onChange={v => setField("contact_person_phone", v)} /></div>
               </div>
 
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-2">Банковские реквизиты</div>
