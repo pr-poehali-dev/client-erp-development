@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import Icon from "@/components/ui/icon";
