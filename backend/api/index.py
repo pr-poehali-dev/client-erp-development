@@ -2492,32 +2492,6 @@ def handle_org_settings(method, body, staff, cur, conn):
         return {'success': True}
     return {'error': 'Неизвестный метод'}
 
-def handle_dadata(body):
-    import urllib.request
-    action = body.get('action', '')
-    query = body.get('query', '')
-    if not query:
-        return {'suggestions': []}
-    api_key = os.environ.get('DADATA_API_KEY', '')
-    if not api_key:
-        return {'error': 'DADATA_API_KEY не настроен'}
-    dadata_headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': 'Token %s' % api_key}
-    if action == 'address':
-        url = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address'
-        payload = json.dumps({'query': query, 'count': 7}).encode()
-    elif action == 'fms_unit':
-        url = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/fms_unit'
-        payload = json.dumps({'query': query, 'count': 5}).encode()
-    elif action == 'party':
-        url = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/party'
-        payload = json.dumps({'query': query, 'count': 5, 'type': body.get('type', 'LEGAL')}).encode()
-    else:
-        return {'error': 'Неизвестное действие dadata'}
-    req = urllib.request.Request(url, data=payload, headers=dadata_headers, method='POST')
-    resp = urllib.request.urlopen(req, timeout=5)
-    result = json.loads(resp.read().decode())
-    return result
-
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings'}
 
 def handler(event, context):
@@ -2578,8 +2552,6 @@ def handler(event, context):
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
             result = handle_cabinet(method, params, body, ev_headers, cur)
-        elif entity == 'dadata':
-            result = handle_dadata(body)
         elif entity == 'cron':
             cron_action = body.get('action') or params.get('action', '')
             if cron_action == 'daily_accrue':

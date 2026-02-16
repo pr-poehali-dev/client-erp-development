@@ -10,6 +10,5 @@
   {"name": "Cabinet unauthorized", "method": "GET", "path": "/?entity=cabinet&action=overview&token=invalid", "expectedStatus": 401},
   {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
   {"name": "Cron daily accrue", "method": "POST", "path": "/", "body": {"entity": "cron", "action": "daily_accrue"}, "expectedStatus": 201, "expectedBody": {"success": true}, "bodyMatcher": "partial"},
-  {"name": "Org settings requires auth", "method": "GET", "path": "/?entity=org_settings", "expectedStatus": 401},
-  {"name": "DaData no api key", "method": "POST", "path": "/", "body": {"entity": "dadata", "action": "address", "query": "test"}, "expectedStatus": 400, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"}
+  {"name": "Org settings requires auth", "method": "GET", "path": "/?entity=org_settings", "expectedStatus": 401}
 ]}
