@@ -1144,17 +1144,20 @@ def register_cyrillic_font():
     _font_registered = True
     return 'DejaVuSans', 'DejaVuSans-Bold'
 
-_logo_path_cache = None
+_logo_cache = {}
+_DEFAULT_LOGO_URL = 'https://cdn.poehali.dev/projects/e404b5e6-12a9-4922-a20d-e3c26e46e7a6/bucket/39b830d8-2ba0-408a-8ced-fe6a9eaf99e4.jpg'
 
-def get_logo_path():
-    global _logo_path_cache
-    if _logo_path_cache and os.path.exists(_logo_path_cache):
-        return _logo_path_cache
+def get_logo_path(logo_url=None):
     import urllib.request
-    p = '/tmp/logo_kpk.jpg'
+    url = logo_url or _DEFAULT_LOGO_URL
+    if url in _logo_cache and os.path.exists(_logo_cache[url]):
+        return _logo_cache[url]
+    ext = url.rsplit('.', 1)[-1] if '.' in url.split('/')[-1] else 'jpg'
+    h = hashlib.md5(url.encode()).hexdigest()[:10]
+    p = '/tmp/logo_%s.%s' % (h, ext)
     if not os.path.exists(p):
-        urllib.request.urlretrieve('https://cdn.poehali.dev/projects/e404b5e6-12a9-4922-a20d-e3c26e46e7a6/bucket/39b830d8-2ba0-408a-8ced-fe6a9eaf99e4.jpg', p)
-    _logo_path_cache = p
+        urllib.request.urlretrieve(url, p)
+    _logo_cache[url] = p
     return p
 
 def load_org_settings(cur):
@@ -1186,7 +1189,8 @@ def build_pdf_header(font_r, font_b, org=None):
         contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
     contacts_line = '    '.join(contacts)
 
-    logo_path = get_logo_path()
+    logo_url = org.get('logo_url') or None
+    logo_path = get_logo_path(logo_url)
     logo = Image(logo_path, width=24*mm, height=24*mm)
 
     name_s = ParagraphStyle('HN', fontName=font_b, fontSize=12, leading=14, textColor=colors.HexColor('#1a3c5e'))
@@ -1243,7 +1247,8 @@ def build_xlsx_header(ws, org=None):
         contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
     contacts_line = '    '.join(contacts)
 
-    logo_path = get_logo_path()
+    logo_url = org.get('logo_url') or None
+    logo_path = get_logo_path(logo_url)
     img = XlImage(logo_path)
     img.width = 80
     img.height = 80
