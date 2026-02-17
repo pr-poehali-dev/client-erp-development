@@ -1,4 +1,4 @@
 {"tests": [
-  {"name": "Daily accrue", "method": "POST", "path": "/", "body": {"date": "2026-02-13"}, "expectedStatus": 200, "expectedBody": {"success": true}, "bodyMatcher": "partial"},
+  {"name": "Daily accrue and overdue check", "method": "POST", "path": "/", "body": {"date": "2026-02-17"}, "expectedStatus": 200, "expectedBody": {"success": true, "overdue": {"checked_date": "string"}}, "bodyMatcher": "partial"},
   {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200}
 ]}

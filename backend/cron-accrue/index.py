@@ -8,7 +8,7 @@ def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
 def handler(event, context):
-    """Ежедневное начисление процентов на остаток по всем активным вкладам. Вызывается по расписанию в 00:05."""
+    """Ежедневный крон: начисление процентов на вклады + пометка просроченных займов. Вызывается по расписанию в 00:05."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400'}, 'body': ''}
 
@@ -51,15 +51,17 @@ def handler(event, context):
             count += 1
             total += daily_amount
 
-        if count > 0:
-            conn.commit()
+        overdue_result = check_overdue_loans(cur, accrual_date)
+
+        conn.commit()
 
         result = {
             'success': True,
             'date': accrual_date,
             'processed': count,
             'skipped': skipped,
-            'total_accrued': float(total)
+            'total_accrued': float(total),
+            'overdue': overdue_result
         }
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
@@ -69,3 +71,57 @@ def handler(event, context):
     finally:
         cur.close()
         conn.close()
+
+
+def check_overdue_loans(cur, check_date):
+    cur.execute("""
+        SELECT DISTINCT ls.loan_id
+        FROM loan_schedule ls
+        JOIN loans l ON l.id = ls.loan_id
+        WHERE l.status = 'active'
+          AND ls.status = 'pending'
+          AND ls.payment_date < '%s'
+          AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+    """ % check_date)
+    overdue_loan_ids = [r[0] for r in cur.fetchall()]
+
+    marked_overdue = 0
+    for loan_id in overdue_loan_ids:
+        cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % loan_id)
+        if cur.rowcount > 0:
+            marked_overdue += 1
+
+        cur.execute("""
+            UPDATE loan_schedule
+            SET status='overdue',
+                overdue_days = (DATE '%s' - payment_date)
+            WHERE loan_id=%s AND status='pending' AND payment_date < '%s'
+              AND COALESCE(paid_amount, 0) < payment_amount
+        """ % (check_date, loan_id, check_date))
+
+    cur.execute("""
+        SELECT DISTINCT l.id
+        FROM loans l
+        WHERE l.status = 'overdue'
+          AND NOT EXISTS (
+              SELECT 1 FROM loan_schedule ls
+              WHERE ls.loan_id = l.id
+                AND ls.status IN ('pending', 'overdue')
+                AND ls.payment_date < '%s'
+                AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+          )
+    """ % check_date)
+    restored_ids = [r[0] for r in cur.fetchall()]
+    restored = 0
+    for loan_id in restored_ids:
+        cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % loan_id)
+        if cur.rowcount > 0:
+            restored += 1
+        cur.execute("UPDATE loan_schedule SET status='pending', overdue_days=0 WHERE loan_id=%s AND status='overdue'" % loan_id)
+
+    return {
+        'checked_date': check_date,
+        'marked_overdue': marked_overdue,
+        'restored_active': restored,
+        'total_overdue_loans': len(overdue_loan_ids)
+    }
