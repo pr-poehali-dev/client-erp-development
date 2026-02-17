@@ -30,7 +30,7 @@ async function request<T>(method: string, params?: Params, body?: unknown): Prom
 }
 
 export const api = {
-  dashboard: () => request<DashboardStats>("GET", { entity: "dashboard" }),
+  dashboard: (orgId?: number) => request<DashboardStats>("GET", { entity: "dashboard", org_id: orgId }),
 
   members: {
     list: () => request<Member[]>("GET", { entity: "members" }),
@@ -183,6 +183,27 @@ export const api = {
   },
 };
 
+export interface OverdueLoanItem {
+  loan_id: number;
+  contract_no: string;
+  member_id: number;
+  member_name: string;
+  balance: number;
+  rate: number;
+  end_date: string;
+  org_id: number | null;
+  org_name: string;
+  overdue_amount: number;
+  overdue_since: string | null;
+  overdue_days: number;
+}
+
+export interface DashboardOrg {
+  id: number;
+  name: string;
+  short_name: string;
+}
+
 export interface DashboardStats {
   total_members: number;
   active_loans: number;
@@ -190,6 +211,8 @@ export interface DashboardStats {
   overdue_loans: number;
   total_savings: number;
   total_shares: number;
+  organizations: DashboardOrg[];
+  overdue_loan_list: OverdueLoanItem[];
 }
 
 export interface Member {

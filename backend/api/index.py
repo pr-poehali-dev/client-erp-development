@@ -2084,20 +2084,74 @@ def handle_export(params, cur):
 
     return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
 
-def handle_dashboard(cur):
+def handle_dashboard(cur, params=None):
+    params = params or {}
+    org_id = params.get('org_id')
+    org_filter_loans = " AND l.org_id=%s" % org_id if org_id else ""
+    org_filter_savings = " AND s.org_id=%s" % org_id if org_id else ""
+    org_filter_shares = " AND sa.org_id=%s" % org_id if org_id else ""
+
     stats = {}
-    cur.execute("SELECT COUNT(*) FROM members WHERE status='active'")
-    stats['total_members'] = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*), COALESCE(SUM(balance),0) FROM loans WHERE status='active'")
+
+    if org_id:
+        cur.execute("SELECT COUNT(DISTINCT m.id) FROM members m JOIN loans l ON l.member_id=m.id WHERE m.status='active' AND l.org_id=%s UNION SELECT COUNT(DISTINCT m.id) FROM members m JOIN savings s ON s.member_id=m.id WHERE m.status='active' AND s.org_id=%s UNION SELECT COUNT(DISTINCT m.id) FROM members m JOIN share_accounts sa ON sa.member_id=m.id WHERE m.status='active' AND sa.org_id=%s" % (org_id, org_id, org_id))
+        rows = cur.fetchall()
+        member_ids = set()
+        cur.execute("SELECT DISTINCT m.id FROM members m LEFT JOIN loans l ON l.member_id=m.id AND l.org_id=%s LEFT JOIN savings s ON s.member_id=m.id AND s.org_id=%s LEFT JOIN share_accounts sa ON sa.member_id=m.id AND sa.org_id=%s WHERE m.status='active' AND (l.id IS NOT NULL OR s.id IS NOT NULL OR sa.id IS NOT NULL)" % (org_id, org_id, org_id))
+        stats['total_members'] = len(cur.fetchall())
+    else:
+        cur.execute("SELECT COUNT(*) FROM members WHERE status='active'")
+        stats['total_members'] = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*), COALESCE(SUM(l.balance),0) FROM loans l WHERE l.status='active'%s" % org_filter_loans)
     r = cur.fetchone()
     stats['active_loans'] = r[0]
     stats['loan_portfolio'] = float(r[1])
-    cur.execute("SELECT COUNT(*) FROM loans WHERE status='overdue'")
+
+    cur.execute("SELECT COUNT(*) FROM loans l WHERE l.status='overdue'%s" % org_filter_loans)
     stats['overdue_loans'] = cur.fetchone()[0]
-    cur.execute("SELECT COALESCE(SUM(current_balance),0) FROM savings WHERE status='active'")
+
+    cur.execute("SELECT COALESCE(SUM(s.current_balance),0) FROM savings s WHERE s.status='active'%s" % org_filter_savings)
     stats['total_savings'] = float(cur.fetchone()[0])
-    cur.execute("SELECT COALESCE(SUM(balance),0) FROM share_accounts WHERE status='active'")
+
+    cur.execute("SELECT COALESCE(SUM(sa.balance),0) FROM share_accounts sa WHERE sa.status='active'%s" % org_filter_shares)
     stats['total_shares'] = float(cur.fetchone()[0])
+
+    cur.execute("SELECT id, name, short_name FROM organizations WHERE is_active=true ORDER BY name")
+    stats['organizations'] = [{'id': r[0], 'name': r[1], 'short_name': r[2]} for r in cur.fetchall()]
+
+    overdue_loans = []
+    cur.execute("""
+        SELECT l.id, l.contract_no, m.id as member_id,
+            COALESCE(m.last_name,'') || ' ' || COALESCE(m.first_name,'') || ' ' || COALESCE(m.middle_name,'') as member_name,
+            l.balance, l.rate, l.end_date, l.org_id,
+            COALESCE(o.short_name, o.name, '') as org_name
+        FROM loans l
+        JOIN members m ON m.id = l.member_id
+        LEFT JOIN organizations o ON o.id = l.org_id
+        WHERE l.status = 'overdue'%s
+        ORDER BY l.end_date
+    """ % org_filter_loans)
+    for r in cur.fetchall():
+        loan_id = r[0]
+        cur.execute("""
+            SELECT COALESCE(SUM(ls.payment_amount - COALESCE(ls.paid_amount,0)),0),
+                   MIN(ls.payment_date),
+                   MAX(CASE WHEN ls.status='overdue' OR (ls.status='pending' AND ls.payment_date < CURRENT_DATE) THEN (CURRENT_DATE - ls.payment_date) ELSE 0 END)
+            FROM loan_schedule ls
+            WHERE ls.loan_id=%s AND ls.status IN ('overdue','pending') AND ls.payment_date < CURRENT_DATE
+        """ % loan_id)
+        sched = cur.fetchone()
+        overdue_loans.append({
+            'loan_id': r[0], 'contract_no': r[1], 'member_id': r[2], 'member_name': r[3].strip(),
+            'balance': float(r[4]), 'rate': float(r[5]), 'end_date': str(r[6]),
+            'org_id': r[7], 'org_name': r[8],
+            'overdue_amount': float(sched[0]) if sched[0] else 0,
+            'overdue_since': str(sched[1]) if sched[1] else None,
+            'overdue_days': int(sched[2]) if sched[2] else 0
+        })
+    stats['overdue_loan_list'] = overdue_loans
+
     return stats
 
 def hash_password(pw):
@@ -2686,7 +2740,7 @@ def handler(event, context):
                     return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Менеджер не может удалять записи'})}
 
         if entity == 'dashboard':
-            result = handle_dashboard(cur)
+            result = handle_dashboard(cur, params)
         elif entity == 'members':
             result = handle_members(method, params, body, cur, conn, staff, src_ip)
         elif entity == 'loans':
