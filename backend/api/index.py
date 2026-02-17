@@ -114,6 +114,30 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
         })
     return schedule
 
+def refresh_loan_overdue_status(cur, lid):
+    cur.execute("SELECT status FROM loans WHERE id=%s" % lid)
+    row = cur.fetchone()
+    if not row or row[0] == 'closed':
+        return
+    cur.execute("""
+        SELECT COUNT(*) FROM loan_schedule
+        WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+          AND payment_date < CURRENT_DATE
+          AND COALESCE(paid_amount,0) < (principal_amount + interest_amount + COALESCE(penalty_amount,0))
+    """ % lid)
+    has_overdue = cur.fetchone()[0] > 0
+    if has_overdue:
+        cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
+        cur.execute("""
+            UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
+            WHERE loan_id=%s AND status IN ('pending','partial') AND payment_date < CURRENT_DATE
+              AND COALESCE(paid_amount,0) < (principal_amount + interest_amount + COALESCE(penalty_amount,0))
+        """ % lid)
+    else:
+        cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
+        cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)
+        cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
+
 def recalc_loan_schedule_statuses(cur, lid):
     cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending' WHERE loan_id=%s" % lid)
     cur.execute("SELECT payment_date, amount FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
@@ -135,6 +159,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             remaining -= applied
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
+    refresh_loan_overdue_status(cur, lid)
 
 def esc(val):
     return str(val).replace("'", "''") if val else ''
@@ -428,6 +453,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (new_monthly, ne.isoformat(), new_term, lid))
                     recalc_schedule = new_sched
 
+            if nb > 0:
+                refresh_loan_overdue_status(cur, lid)
+
             pay_detail = 'Сумма: %s, ОД: %s, %%: %s' % (float(amt), float(pp), float(i_p))
             if recalc_schedule:
                 pay_detail += ', график пересчитан (%s)' % overpay_strategy
@@ -476,6 +504,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             ne = date.fromisoformat(ns[-1]['payment_date'])
             cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), nt, lid))
             cur.execute("INSERT INTO loan_payments (loan_id,payment_date,amount,principal_part,payment_type) VALUES (%s,'%s',%s,%s,'early_partial')" % (lid, pd, amt, amt))
+            refresh_loan_overdue_status(cur, lid)
             audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Частичное: %s, тип: %s' % (amt, rt), ip)
             conn.commit()
             return {'success': True, 'new_balance': nb, 'new_schedule': ns, 'new_monthly': nm}
@@ -502,8 +531,6 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 nb = Decimal(str(cur.fetchone()[0]))
                 if nb <= 0:
                     cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
-                elif nb > 0:
-                    cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s" % lid)
             recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'update_payment', 'loan', lid, '', 'Платёж #%s: сумма %s, ОД %s, %%: %s' % (pid, float(new_amount), float(new_pp), float(new_ip)), ip)
             conn.commit()
@@ -518,7 +545,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             lid, old_pp = old[0], Decimal(str(old[1]))
             cur.execute("DELETE FROM loan_payments WHERE id=%s" % pid)
             if old_pp > 0:
-                cur.execute("UPDATE loans SET balance=balance+%s, status='active', updated_at=NOW() WHERE id=%s" % (float(old_pp), lid))
+                cur.execute("UPDATE loans SET balance=balance+%s, updated_at=NOW() WHERE id=%s" % (float(old_pp), lid))
             recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'delete_payment', 'loan', lid, '', 'Удалён платёж #%s (ОД: %s)' % (pid, float(old_pp)), ip)
             conn.commit()
