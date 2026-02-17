@@ -2609,14 +2609,21 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
             logo_b64 = body.get('logo')
             if not logo_b64:
                 return {'error': 'Не передан логотип'}
+            allowed_types = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg'}
+            ct = body.get('content_type', 'image/png')
+            if ct not in allowed_types:
+                return {'_status': 400, 'error': 'Недопустимый формат. Допустимы: PNG, JPEG, WebP, SVG'}
             import boto3
             logo_data = base64.b64decode(logo_b64)
+            if len(logo_data) > 2 * 1024 * 1024:
+                return {'_status': 400, 'error': 'Файл слишком большой. Максимум 2 МБ'}
+            ext = allowed_types[ct]
             s3 = boto3.client('s3',
                 endpoint_url='https://bucket.poehali.dev',
                 aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
                 aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'])
-            s3_key = 'org_logos/%s.png' % org_id
-            s3.put_object(Bucket='files', Key=s3_key, Body=logo_data, ContentType='image/png')
+            s3_key = 'org_logos/%s.%s' % (org_id, ext)
+            s3.put_object(Bucket='files', Key=s3_key, Body=logo_data, ContentType=ct)
             cdn_url = 'https://cdn.poehali.dev/projects/%s/bucket/%s' % (os.environ['AWS_ACCESS_KEY_ID'], s3_key)
             cur.execute("UPDATE organizations SET logo_url='%s', updated_at=NOW() WHERE id=%s" % (esc(cdn_url), org_id))
             audit_log(cur, staff, 'upload_logo', 'organization', org_id, '', '', ip)

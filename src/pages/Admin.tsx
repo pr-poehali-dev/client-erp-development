@@ -126,11 +126,20 @@ const Admin = () => {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editOrg) return;
+    const allowedTypes = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+    if (!allowedTypes.includes(file.type)) {
+      toast({ title: "Неверный формат", description: "Допустимы: PNG, JPEG, WebP, SVG", variant: "destructive" });
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast({ title: "Файл слишком большой", description: "Максимум 2 МБ", variant: "destructive" });
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = (reader.result as string).split(",")[1];
       try {
-        const res = await api.organizations.uploadLogo(editOrg.id, base64);
+        const res = await api.organizations.uploadLogo(editOrg.id, base64, file.type);
         setOrgForm(prev => ({ ...prev, logo_url: res.logo_url }));
         toast({ title: "Логотип загружен" });
         loadOrgs();

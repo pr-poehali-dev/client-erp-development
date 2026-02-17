@@ -178,7 +178,7 @@ export const api = {
     get: (id: number) => request<Organization>("GET", { entity: "organizations", id }),
     create: (data: Partial<Organization>) => request<{ id: number }>("POST", undefined, { entity: "organizations", action: "create", ...data }),
     update: (data: Partial<Organization> & { id: number }) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "update", ...data }),
-    uploadLogo: (orgId: number, logoBase64: string) => request<{ success: boolean; logo_url: string }>("POST", undefined, { entity: "organizations", action: "upload_logo", id: orgId, logo: logoBase64 }),
+    uploadLogo: (orgId: number, logoBase64: string, contentType?: string) => request<{ success: boolean; logo_url: string }>("POST", undefined, { entity: "organizations", action: "upload_logo", id: orgId, logo: logoBase64, content_type: contentType }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "delete", id }),
   },
 };
