@@ -597,9 +597,78 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
+def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions):
+    r = Decimal(str(rate))
+    schedule = []
+    cumulative = Decimal('0')
+    bal_changes = []
+    bal_changes.append((start_date, Decimal(str(initial_amount))))
+    for tx in transactions:
+        tx_date = date.fromisoformat(str(tx[0])) if not isinstance(tx[0], date) else tx[0]
+        tx_amt = Decimal(str(tx[1]))
+        tx_type = tx[2]
+        if tx_type == 'deposit':
+            bal_changes.append((tx_date, tx_amt))
+        elif tx_type in ('withdrawal', 'partial_withdrawal'):
+            bal_changes.append((tx_date, -tx_amt))
+    bal_changes.sort(key=lambda x: x[0])
+
+    for i in range(1, term + 1):
+        period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
+        period_end = last_day_of_month(add_months(start_date, i - 1))
+        running_bal = Decimal('0')
+        for bd, ba in bal_changes:
+            if bd <= period_start:
+                running_bal += ba
+        interest = Decimal('0')
+        sub_starts = [period_start]
+        for bd, ba in bal_changes:
+            if period_start < bd <= period_end:
+                if bd not in sub_starts:
+                    sub_starts.append(bd)
+        sub_starts.sort()
+        current_bal = running_bal
+        for j, ss in enumerate(sub_starts):
+            se = sub_starts[j + 1] if j + 1 < len(sub_starts) else period_end
+            days = (se - ss).days
+            if j == len(sub_starts) - 1:
+                days = (period_end - ss).days
+            if days > 0 and current_bal > 0:
+                day_interest = (current_bal * r / Decimal('100') * Decimal(str(days)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                interest += day_interest
+            for bd, ba in bal_changes:
+                if bd == (sub_starts[j + 1] if j + 1 < len(sub_starts) else None):
+                    current_bal += ba
+        cumulative += interest
+        final_bal = Decimal('0')
+        for bd, ba in bal_changes:
+            if bd <= period_end:
+                final_bal += ba
+        balance_after = float(final_bal + cumulative) if payout_type == 'end_of_term' else float(final_bal)
+        schedule.append({
+            'period_no': i, 'period_start': period_start.isoformat(),
+            'period_end': period_end.isoformat(), 'interest_amount': float(interest),
+            'cumulative_interest': float(cumulative), 'balance_after': balance_after,
+        })
+    return schedule
+
 def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_type):
     cur.execute("DELETE FROM savings_schedule WHERE saving_id=%s AND status IN ('pending','accrued')" % sid)
-    schedule = calc_savings_schedule(amount, rate, term, start_date, payout_type)
+    cur.execute("SELECT transaction_date, amount, transaction_type FROM savings_transactions WHERE saving_id=%s AND transaction_type IN ('deposit','withdrawal','partial_withdrawal') ORDER BY transaction_date, id" % sid)
+    transactions = cur.fetchall()
+    cur.execute("SELECT amount FROM savings WHERE id=%s" % sid)
+    sv_row = cur.fetchone()
+    initial_amount = float(sv_row[0])
+    for tx in transactions:
+        tx_type = tx[2]
+        tx_amt = float(tx[1])
+        if tx_type == 'deposit':
+            initial_amount -= tx_amt
+        elif tx_type in ('withdrawal', 'partial_withdrawal'):
+            initial_amount += tx_amt
+    if initial_amount < 0:
+        initial_amount = 0
+    schedule = calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions)
     today = date.today().isoformat()
     for item in schedule:
         cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='paid'" % (sid, item['period_no']))
@@ -863,8 +932,11 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             new_bal = bal - a
             if new_bal < min_bal:
                 return {'error': 'Нельзя снять больше. Неснижаемый остаток: %s руб. (текущий баланс: %s руб.)' % (float(min_bal), float(bal))}
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'withdrawal','Частичное изъятие')" % (sid, td, float(a)))
-            cur.execute("UPDATE savings SET current_balance=current_balance-%s, updated_at=NOW() WHERE id=%s" % (float(a), sid))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'partial_withdrawal','Частичное изъятие')" % (sid, td, float(a)))
+            cur.execute("UPDATE savings SET current_balance=current_balance-%s, amount=amount-%s, updated_at=NOW() WHERE id=%s" % (float(a), float(a), sid))
+            cur.execute("SELECT amount, rate, term_months, start_date, payout_type FROM savings WHERE id=%s" % sid)
+            sv2 = cur.fetchone()
+            recalc_savings_schedule(cur, sid, float(sv2[0]), float(sv2[1]), int(sv2[2]), date.fromisoformat(str(sv2[3])), sv2[4])
             audit_log(cur, staff, 'partial_withdrawal', 'saving', sid, '', 'Сумма: %s, остаток: %s' % (float(a), float(new_bal)), ip)
             conn.commit()
             return {'success': True, 'new_balance': float(new_bal), 'min_balance': float(min_bal)}
