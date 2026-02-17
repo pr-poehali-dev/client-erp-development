@@ -196,6 +196,7 @@ export interface OverdueLoanItem {
   overdue_amount: number;
   overdue_since: string | null;
   overdue_days: number;
+  penalty_total: number;
 }
 
 export interface DashboardOrg {

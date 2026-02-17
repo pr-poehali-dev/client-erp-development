@@ -188,6 +188,12 @@ const Dashboard = () => {
                       <span className="font-medium text-red-600">{formatMoney(item.overdue_amount)}</span>
                     </div>
                   )}
+                  {item.penalty_total > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-red-600">Пени</span>
+                      <span className="font-medium text-red-600">{formatMoney(item.penalty_total)}</span>
+                    </div>
+                  )}
                   {item.overdue_since && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Просрочка с</span>

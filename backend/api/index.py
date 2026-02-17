@@ -2137,7 +2137,8 @@ def handle_dashboard(cur, params=None):
         cur.execute("""
             SELECT COALESCE(SUM(ls.payment_amount - COALESCE(ls.paid_amount,0)),0),
                    MIN(ls.payment_date),
-                   MAX(CASE WHEN ls.status='overdue' OR (ls.status='pending' AND ls.payment_date < CURRENT_DATE) THEN (CURRENT_DATE - ls.payment_date) ELSE 0 END)
+                   MAX(CASE WHEN ls.status='overdue' OR (ls.status='pending' AND ls.payment_date < CURRENT_DATE) THEN (CURRENT_DATE - ls.payment_date) ELSE 0 END),
+                   COALESCE(SUM(ls.penalty_amount),0)
             FROM loan_schedule ls
             WHERE ls.loan_id=%s AND ls.status IN ('overdue','pending') AND ls.payment_date < CURRENT_DATE
         """ % loan_id)
@@ -2148,7 +2149,8 @@ def handle_dashboard(cur, params=None):
             'org_id': r[7], 'org_name': r[8],
             'overdue_amount': float(sched[0]) if sched[0] else 0,
             'overdue_since': str(sched[1]) if sched[1] else None,
-            'overdue_days': int(sched[2]) if sched[2] else 0
+            'overdue_days': int(sched[2]) if sched[2] else 0,
+            'penalty_total': float(sched[3]) if sched[3] else 0
         })
     stats['overdue_loan_list'] = overdue_loans
 

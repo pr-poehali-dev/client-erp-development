@@ -441,15 +441,17 @@ const Loans = () => {
                           <thead><tr className="border-b text-xs text-muted-foreground">
                             <th className="text-left py-2 px-2">№</th><th className="text-left py-2 px-2">Дата</th>
                             <th className="text-right py-2 px-2">Платёж</th><th className="text-right py-2 px-2">Осн. долг</th>
-                            <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Остаток</th>
+                            <th className="text-right py-2 px-2">Проценты</th><th className="text-right py-2 px-2">Пени</th>
+                            <th className="text-right py-2 px-2">Остаток</th>
                             <th className="text-center py-2 px-2">Статус</th>
                           </tr></thead>
                           <tbody>{detail.schedule.map(r => (
-                            <tr key={r.payment_no} className="border-b last:border-0 hover:bg-muted/30">
+                            <tr key={r.payment_no} className={`border-b last:border-0 hover:bg-muted/30 ${r.status === "overdue" ? "bg-red-50" : ""}`}>
                               <td className="py-2 px-2">{r.payment_no}</td><td className="py-2 px-2">{fmtDate(r.payment_date)}</td>
                               <td className="py-2 px-2 text-right font-medium">{fmt(r.payment_amount)}</td>
                               <td className="py-2 px-2 text-right">{fmt(r.principal_amount)}</td>
                               <td className="py-2 px-2 text-right">{fmt(r.interest_amount)}</td>
+                              <td className={`py-2 px-2 text-right ${(r.penalty_amount || 0) > 0 ? "text-red-600 font-medium" : ""}`}>{fmt(r.penalty_amount || 0)}</td>
                               <td className="py-2 px-2 text-right">{fmt(r.balance_after)}</td>
                               <td className="py-2 px-2 text-center">
                                 <Badge variant={statusVariant(r.status || "pending") as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[r.status || "pending"] || r.status}</Badge>

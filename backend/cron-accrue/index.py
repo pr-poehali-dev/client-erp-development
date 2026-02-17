@@ -52,6 +52,7 @@ def handler(event, context):
             total += daily_amount
 
         overdue_result = check_overdue_loans(cur, accrual_date)
+        penalty_result = accrue_penalties(cur, accrual_date)
 
         conn.commit()
 
@@ -61,7 +62,8 @@ def handler(event, context):
             'processed': count,
             'skipped': skipped,
             'total_accrued': float(total),
-            'overdue': overdue_result
+            'overdue': overdue_result,
+            'penalties': penalty_result
         }
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
@@ -124,4 +126,45 @@ def check_overdue_loans(cur, check_date):
         'marked_overdue': marked_overdue,
         'restored_active': restored,
         'total_overdue_loans': len(overdue_loan_ids)
+    }
+
+
+PENALTY_DAILY_RATE = Decimal('0.000547')
+
+def accrue_penalties(cur, check_date):
+    cur.execute("""
+        SELECT ls.id, ls.loan_id, ls.principal_amount, COALESCE(ls.paid_amount, 0), ls.penalty_amount
+        FROM loan_schedule ls
+        JOIN loans l ON l.id = ls.loan_id
+        WHERE ls.status = 'overdue'
+          AND l.status = 'overdue'
+          AND ls.payment_date < '%s'
+    """ % check_date)
+    rows = cur.fetchall()
+
+    total_penalty = Decimal('0')
+    updated = 0
+
+    for row in rows:
+        ls_id, loan_id, principal, paid, current_penalty = row
+        principal = Decimal(str(principal))
+        paid = Decimal(str(paid))
+        current_penalty = Decimal(str(current_penalty)) if current_penalty else Decimal('0')
+
+        overdue_principal = principal - min(paid, principal)
+        if overdue_principal <= 0:
+            continue
+
+        daily_penalty = (overdue_principal * PENALTY_DAILY_RATE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if daily_penalty <= 0:
+            continue
+
+        new_penalty = current_penalty + daily_penalty
+        cur.execute("UPDATE loan_schedule SET penalty_amount=%s WHERE id=%s" % (float(new_penalty), ls_id))
+        total_penalty += daily_penalty
+        updated += 1
+
+    return {
+        'schedules_penalized': updated,
+        'total_daily_penalty': float(total_penalty)
     }
