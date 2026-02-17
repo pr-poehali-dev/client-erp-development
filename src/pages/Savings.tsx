@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Saving, SavingDetail, SavingTransaction, Member, SavingsScheduleItem } from "@/lib/api";
+import api, { Saving, SavingDetail, SavingTransaction, Member, SavingsScheduleItem, Organization } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -22,6 +22,7 @@ const ttLabels: Record<string, string> = { opening: "Открытие", deposit:
 const columns: Column<Saving>[] = [
   { key: "contract_no", label: "Договор", className: "font-medium" },
   { key: "member_name", label: "Пайщик" },
+  { key: "org_name", label: "Организация", render: (i: Saving) => <span className="text-xs text-muted-foreground">{i.org_short_name || i.org_name || "—"}</span> },
   { key: "amount", label: "Сумма вклада", render: (i: Saving) => fmt(i.amount) },
   { key: "rate", label: "Ставка", render: (i: Saving) => i.rate + "%" },
   { key: "term_months", label: "Срок", render: (i: Saving) => i.term_months + " мес." },
@@ -41,6 +42,7 @@ const columns: Column<Saving>[] = [
 const Savings = () => {
   const [items, setItems] = useState<Saving[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -66,11 +68,12 @@ const Savings = () => {
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
 
-  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "" });
+  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" });
 
   const load = () => {
     setLoading(true);
     Promise.all([api.savings.list(), api.members.list()]).then(([s, m]) => { setItems(s); setMembers(m); }).finally(() => setLoading(false));
+    api.organizations.list().then(setOrgs).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -90,6 +93,7 @@ const Savings = () => {
         amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
         payout_type: form.payout_type, start_date: form.start_date,
         min_balance_pct: form.min_balance_pct ? Number(form.min_balance_pct) : 0,
+        org_id: form.org_id ? Number(form.org_id) : undefined,
       });
       toast({ title: "Договор сбережений создан" });
       setShowForm(false);
@@ -297,7 +301,7 @@ const Savings = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Сбережения" description={`${items.filter(s => s.status === "active").length} активных договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "" }); setPreview(null); setShowForm(true); }} />
+      <PageHeader title="Сбережения" description={`${items.filter(s => s.status === "active").length} активных договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" }); setPreview(null); setShowForm(true); }} />
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Общая сумма вкладов</div><div className="text-xl font-bold">{fmt(totalSavings)}</div></Card>
@@ -319,6 +323,17 @@ const Savings = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Новый договор сбережений</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Организация *</Label>
+              <Select value={String(form.org_id || "")} onValueChange={v => setForm(p => ({ ...p, org_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Выберите организацию" /></SelectTrigger>
+                <SelectContent>
+                  {orgs.map(o => (
+                    <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Пайщик *</Label>
               <MemberSearch members={members} value={form.member_id} onChange={(id) => setForm(p => ({ ...p, member_id: id }))} />

@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { ShareAccount, ShareAccountDetail, ShareTransaction, Member } from "@/lib/api";
+import api, { ShareAccount, ShareAccountDetail, ShareTransaction, Member, Organization } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -22,6 +22,7 @@ const ttLabels: Record<string, string> = { in: "Внесение", out: "Вып�
 const columns: Column<ShareAccount>[] = [
   { key: "account_no", label: "Номер счёта", className: "font-medium" },
   { key: "member_name", label: "Пайщик" },
+  { key: "org_name", label: "Организация", render: (i: ShareAccount) => <span className="text-xs text-muted-foreground">{i.org_short_name || i.org_name || "—"}</span> },
   { key: "balance", label: "Баланс", className: "font-semibold", render: (i: ShareAccount) => fmt(i.balance) },
   { key: "total_in", label: "Всего внесено", render: (i: ShareAccount) => fmt(i.total_in) },
   { key: "total_out", label: "Всего выплачено", render: (i: ShareAccount) => fmt(i.total_out) },
@@ -37,6 +38,7 @@ const columns: Column<ShareAccount>[] = [
 const Shares = () => {
   const [accounts, setAccounts] = useState<ShareAccount[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -50,12 +52,13 @@ const Shares = () => {
   const [showEditTx, setShowEditTx] = useState(false);
   const [editTxForm, setEditTxForm] = useState({ transaction_id: 0, amount: "", transaction_date: "", description: "" });
 
-  const [createForm, setCreateForm] = useState({ member_id: "", amount: "" });
+  const [createForm, setCreateForm] = useState({ member_id: "", amount: "", org_id: "" });
   const [opForm, setOpForm] = useState({ account_id: "", type: "in", amount: "", date: new Date().toISOString().slice(0, 10), description: "" });
 
   const load = () => {
     setLoading(true);
     Promise.all([api.shares.list(), api.members.list()]).then(([s, m]) => { setAccounts(s); setMembers(m); }).finally(() => setLoading(false));
+    api.organizations.list().then(setOrgs).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -64,7 +67,7 @@ const Shares = () => {
   const handleCreate = async () => {
     setSaving(true);
     try {
-      await api.shares.create({ member_id: Number(createForm.member_id), amount: Number(createForm.amount) });
+      await api.shares.create({ member_id: Number(createForm.member_id), amount: Number(createForm.amount), org_id: createForm.org_id ? Number(createForm.org_id) : undefined });
       toast({ title: "Паевой счёт открыт" });
       setShowForm(false);
       load();
@@ -187,7 +190,7 @@ const Shares = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Паевые счета" description={`${accounts.length} счетов`} actionLabel="Открыть счёт" actionIcon="Plus" onAction={() => { setCreateForm({ member_id: "", amount: "" }); setShowForm(true); }} />
+      <PageHeader title="Паевые счета" description={`${accounts.length} счетов`} actionLabel="Открыть счёт" actionIcon="Plus" onAction={() => { setCreateForm({ member_id: "", amount: "", org_id: "" }); setShowForm(true); }} />
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Паевой фонд</div><div className="text-xl font-bold">{fmt(totalBalance)}</div></Card>
@@ -212,6 +215,17 @@ const Shares = () => {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Открыть паевой счёт</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Организация *</Label>
+              <Select value={String(createForm.org_id || "")} onValueChange={v => setCreateForm(p => ({ ...p, org_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Выберите организацию" /></SelectTrigger>
+                <SelectContent>
+                  {orgs.map(o => (
+                    <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Пайщик *</Label>
               <MemberSearch members={members} value={createForm.member_id} onChange={(id) => setCreateForm(p => ({ ...p, member_id: id }))} />

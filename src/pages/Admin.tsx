@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import PageHeader from "@/components/ui/page-header";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser, AuditLogEntry, Member, OrgSettings } from "@/lib/api";
+import api, { StaffUser, AuditLogEntry, Member, Organization } from "@/lib/api";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -64,26 +64,12 @@ const Admin = () => {
   const [auditPage, setAuditPage] = useState(0);
   const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
   const [auditLoading, setAuditLoading] = useState(false);
-  const [orgSettings, setOrgSettings] = useState<OrgSettings>({ name: "", inn: "", ogrn: "", director_fio: "", bank_name: "", bik: "", rs: "", phone: "", website: "", email: "", telegram: "", whatsapp: "" });
-  const [orgLoading, setOrgLoading] = useState(false);
+  const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [showOrgForm, setShowOrgForm] = useState(false);
+  const [editOrg, setEditOrg] = useState<Organization | null>(null);
+  const [orgForm, setOrgForm] = useState<Partial<Organization>>({});
   const [orgSaving, setOrgSaving] = useState(false);
-
-  const loadOrgSettings = () => {
-    setOrgLoading(true);
-    api.orgSettings.get().then(setOrgSettings).catch(() => {}).finally(() => setOrgLoading(false));
-  };
-
-  const saveOrgSettings = async () => {
-    setOrgSaving(true);
-    try {
-      await api.orgSettings.save(orgSettings);
-      toast({ title: "Настройки сохранены" });
-    } catch (e) {
-      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
-    } finally {
-      setOrgSaving(false);
-    }
-  };
 
   const load = () => {
     setLoading(true);
@@ -101,6 +87,69 @@ const Admin = () => {
       setAuditTotal(res.total);
       setAuditPage(page);
     }).finally(() => setAuditLoading(false));
+  };
+
+  const loadOrgs = () => {
+    setOrgsLoading(true);
+    api.organizations.list().then(setOrgs).catch(() => {}).finally(() => setOrgsLoading(false));
+  };
+
+  const openOrgForm = (org?: Organization) => {
+    if (org) {
+      setEditOrg(org);
+      setOrgForm({ ...org });
+    } else {
+      setEditOrg(null);
+      setOrgForm({ director_position: "Директор" });
+    }
+    setShowOrgForm(true);
+  };
+
+  const saveOrg = async () => {
+    setOrgSaving(true);
+    try {
+      if (editOrg) {
+        await api.organizations.update({ id: editOrg.id, ...orgForm } as Organization & { id: number });
+      } else {
+        await api.organizations.create(orgForm);
+      }
+      toast({ title: editOrg ? "Организация обновлена" : "Организация создана" });
+      setShowOrgForm(false);
+      loadOrgs();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setOrgSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editOrg) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      try {
+        const res = await api.organizations.uploadLogo(editOrg.id, base64);
+        setOrgForm(prev => ({ ...prev, logo_url: res.logo_url }));
+        toast({ title: "Логотип загружен" });
+        loadOrgs();
+      } catch (err) {
+        toast({ title: "Ошибка загрузки", description: String(err), variant: "destructive" });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const deleteOrg = async (org: Organization) => {
+    if (!confirm(`Удалить организацию "${org.name}"?`)) return;
+    try {
+      await api.organizations.delete(org.id);
+      toast({ title: "Организация удалена" });
+      loadOrgs();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
   };
 
   const staffUsers = users.filter((u) => u.role === "admin" || u.role === "manager");
@@ -249,7 +298,7 @@ const Admin = () => {
           <TabsTrigger value="users">Сотрудники</TabsTrigger>
           <TabsTrigger value="clients">Клиенты ЛК</TabsTrigger>
           <TabsTrigger value="audit" onClick={() => { if (auditLog.length === 0) loadAudit(); }}>Журнал действий</TabsTrigger>
-          <TabsTrigger value="org" onClick={() => { if (!orgSettings.name && !orgLoading) loadOrgSettings(); }}>Организация</TabsTrigger>
+          <TabsTrigger value="org" onClick={() => { if (orgs.length === 0 && !orgsLoading) loadOrgs(); }}>Организации</TabsTrigger>
           <TabsTrigger value="roles">Роли и права</TabsTrigger>
           <TabsTrigger value="profile">Мой профиль</TabsTrigger>
         </TabsList>
@@ -437,101 +486,56 @@ const Admin = () => {
           )}
         </TabsContent>
 
-        <TabsContent value="org" className="mt-4">
-          {orgLoading ? (
+        <TabsContent value="org" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">Организации</h3>
+              <p className="text-xs text-muted-foreground">Управление организациями, предоставляющими финансовые услуги</p>
+            </div>
+            <Button onClick={() => openOrgForm()} className="gap-2">
+              <Icon name="Plus" size={16} />Добавить организацию
+            </Button>
+          </div>
+
+          {orgsLoading ? (
             <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
-          ) : (
-            <Card className="max-w-2xl">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Icon name="Building2" size={20} className="text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">Реквизиты организации</CardTitle>
-                    <p className="text-xs text-muted-foreground mt-0.5">Данные используются в документах и выписках</p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">Наименование</Label>
-                  <Input value={orgSettings.name} onChange={(e) => setOrgSettings({ ...orgSettings, name: e.target.value })} placeholder='КПК «ЭКСПЕРТ ФИНАНС»' />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium">ИНН</Label>
-                    <Input value={orgSettings.inn} onChange={(e) => setOrgSettings({ ...orgSettings, inn: e.target.value })} placeholder="1234567890" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium">ОГРН</Label>
-                    <Input value={orgSettings.ogrn} onChange={(e) => setOrgSettings({ ...orgSettings, ogrn: e.target.value })} placeholder="1234567890123" />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium">ФИО руководителя</Label>
-                  <Input value={orgSettings.director_fio} onChange={(e) => setOrgSettings({ ...orgSettings, director_fio: e.target.value })} placeholder="Иванов Иван Иванович" />
-                </div>
-                <div className="border-t pt-4 mt-4">
-                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Icon name="Phone" size={16} className="text-muted-foreground" />
-                    Контакты
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Телефон</Label>
-                        <Input value={orgSettings.phone} onChange={(e) => setOrgSettings({ ...orgSettings, phone: e.target.value })} placeholder="8 (800) 700-89-09" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Сайт</Label>
-                        <Input value={orgSettings.website} onChange={(e) => setOrgSettings({ ...orgSettings, website: e.target.value })} placeholder="nfofinans.ru" />
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium">Email</Label>
-                      <Input value={orgSettings.email} onChange={(e) => setOrgSettings({ ...orgSettings, email: e.target.value })} placeholder="info@sll-expert.ru" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Telegram</Label>
-                        <Input value={orgSettings.telegram} onChange={(e) => setOrgSettings({ ...orgSettings, telegram: e.target.value })} placeholder="@nfofinans_161" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">WhatsApp</Label>
-                        <Input value={orgSettings.whatsapp} onChange={(e) => setOrgSettings({ ...orgSettings, whatsapp: e.target.value })} placeholder="+79613032756" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="border-t pt-4 mt-4">
-                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Icon name="Landmark" size={16} className="text-muted-foreground" />
-                    Банковские реквизиты
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium">Наименование банка</Label>
-                      <Input value={orgSettings.bank_name} onChange={(e) => setOrgSettings({ ...orgSettings, bank_name: e.target.value })} placeholder="ПАО Сбербанк" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">БИК</Label>
-                        <Input value={orgSettings.bik} onChange={(e) => setOrgSettings({ ...orgSettings, bik: e.target.value })} placeholder="044525225" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Расчётный счёт</Label>
-                        <Input value={orgSettings.rs} onChange={(e) => setOrgSettings({ ...orgSettings, rs: e.target.value })} placeholder="40702810000000000000" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <Button onClick={saveOrgSettings} disabled={orgSaving} className="gap-2">
-                  {orgSaving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                  {orgSaving ? "Сохранение..." : "Сохранить"}
-                </Button>
-              </CardContent>
+          ) : orgs.length === 0 ? (
+            <Card className="p-8 text-center">
+              <Icon name="Building2" size={40} className="mx-auto text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">Нет организаций. Добавьте первую.</p>
             </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {orgs.map(org => (
+                <Card key={org.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openOrgForm(org)}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      {org.logo_url ? (
+                        <img src={org.logo_url} alt="" className="w-12 h-12 rounded-lg object-cover border" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <Icon name="Building2" size={20} className="text-primary" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-sm truncate">{org.name || "Без названия"}</h4>
+                        {org.short_name && <p className="text-xs text-muted-foreground truncate">{org.short_name}</p>}
+                        {org.inn && <p className="text-xs text-muted-foreground mt-1">ИНН: {org.inn}</p>}
+                        {org.director_fio && <p className="text-xs text-muted-foreground">{org.director_position || "Директор"}: {org.director_fio}</p>}
+                      </div>
+                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                        <button className="p-1 rounded hover:bg-muted" onClick={() => openOrgForm(org)}><Icon name="Pencil" size={14} /></button>
+                        <button className="p-1 rounded hover:bg-muted text-destructive" onClick={() => deleteOrg(org)}><Icon name="Trash2" size={14} /></button>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-3 pt-3 border-t text-xs text-muted-foreground">
+                      {org.phone && <span className="flex items-center gap-1"><Icon name="Phone" size={10} />{org.phone}</span>}
+                      {org.email && <span className="flex items-center gap-1"><Icon name="Mail" size={10} />{org.email}</span>}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </TabsContent>
 
@@ -768,6 +772,134 @@ const Admin = () => {
             </div>
             <Button onClick={handlePwChange} disabled={saving || !pwForm.new_password} className="w-full">
               {saving ? "Сохранение..." : "Сменить пароль"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showOrgForm} onOpenChange={setShowOrgForm}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editOrg ? "Редактировать организацию" : "Новая организация"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            {editOrg && (
+              <div className="flex items-center gap-4">
+                {orgForm.logo_url ? (
+                  <img src={orgForm.logo_url} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center">
+                    <Icon name="Image" size={24} className="text-muted-foreground" />
+                  </div>
+                )}
+                <div>
+                  <Label className="text-xs">Логотип</Label>
+                  <Input type="file" accept="image/*" onChange={handleLogoUpload} className="mt-1 h-9 text-xs" />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Полное наименование *</Label>
+              <Input value={orgForm.name || ""} onChange={e => setOrgForm({ ...orgForm, name: e.target.value })} placeholder='КПК «ЭКСПЕРТ ФИНАНС»' />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Краткое наименование</Label>
+              <Input value={orgForm.short_name || ""} onChange={e => setOrgForm({ ...orgForm, short_name: e.target.value })} placeholder="ЭКСПЕРТ ФИНАНС" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">ИНН</Label>
+                <Input value={orgForm.inn || ""} onChange={e => setOrgForm({ ...orgForm, inn: e.target.value })} placeholder="1234567890" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">ОГРН</Label>
+                <Input value={orgForm.ogrn || ""} onChange={e => setOrgForm({ ...orgForm, ogrn: e.target.value })} placeholder="1234567890123" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">КПП</Label>
+                <Input value={orgForm.kpp || ""} onChange={e => setOrgForm({ ...orgForm, kpp: e.target.value })} placeholder="123456789" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">ФИО руководителя</Label>
+                <Input value={orgForm.director_fio || ""} onChange={e => setOrgForm({ ...orgForm, director_fio: e.target.value })} placeholder="Иванов Иван Иванович" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Должность руководителя</Label>
+                <Input value={orgForm.director_position || ""} onChange={e => setOrgForm({ ...orgForm, director_position: e.target.value })} placeholder="Директор" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Юридический адрес</Label>
+              <Input value={orgForm.legal_address || ""} onChange={e => setOrgForm({ ...orgForm, legal_address: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Фактический адрес</Label>
+              <Input value={orgForm.actual_address || ""} onChange={e => setOrgForm({ ...orgForm, actual_address: e.target.value })} />
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Icon name="Phone" size={16} className="text-muted-foreground" />Контакты
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Телефон</Label>
+                  <Input value={orgForm.phone || ""} onChange={e => setOrgForm({ ...orgForm, phone: e.target.value })} placeholder="8 (800) 700-89-09" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Email</Label>
+                  <Input value={orgForm.email || ""} onChange={e => setOrgForm({ ...orgForm, email: e.target.value })} placeholder="info@company.ru" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Сайт</Label>
+                  <Input value={orgForm.website || ""} onChange={e => setOrgForm({ ...orgForm, website: e.target.value })} placeholder="company.ru" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Telegram</Label>
+                  <Input value={orgForm.telegram || ""} onChange={e => setOrgForm({ ...orgForm, telegram: e.target.value })} placeholder="@company" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">WhatsApp</Label>
+                  <Input value={orgForm.whatsapp || ""} onChange={e => setOrgForm({ ...orgForm, whatsapp: e.target.value })} placeholder="+79001234567" />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Icon name="Landmark" size={16} className="text-muted-foreground" />Банковские реквизиты
+              </h3>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Наименование банка</Label>
+                  <Input value={orgForm.bank_name || ""} onChange={e => setOrgForm({ ...orgForm, bank_name: e.target.value })} placeholder="ПАО Сбербанк" />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">БИК</Label>
+                    <Input value={orgForm.bik || ""} onChange={e => setOrgForm({ ...orgForm, bik: e.target.value })} placeholder="044525225" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Расчётный счёт</Label>
+                    <Input value={orgForm.rs || ""} onChange={e => setOrgForm({ ...orgForm, rs: e.target.value })} placeholder="40702810..." />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Корр. счёт</Label>
+                    <Input value={orgForm.ks || ""} onChange={e => setOrgForm({ ...orgForm, ks: e.target.value })} placeholder="30101810..." />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={saveOrg} disabled={orgSaving || !orgForm.name} className="w-full gap-2">
+              {orgSaving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+              {orgSaving ? "Сохранение..." : (editOrg ? "Сохранить" : "Создать")}
             </Button>
           </div>
         </DialogContent>

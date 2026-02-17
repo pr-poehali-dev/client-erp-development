@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Loan, LoanDetail, LoanPayment, Member, ScheduleItem } from "@/lib/api";
+import api, { Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -28,6 +28,7 @@ const statusVariant = (s: string) => {
 const columns: Column<Loan>[] = [
   { key: "contract_no", label: "Договор", className: "font-medium" },
   { key: "member_name", label: "Пайщик" },
+  { key: "org_name", label: "Организация", render: (i: Loan) => <span className="text-xs text-muted-foreground">{i.org_short_name || i.org_name || "—"}</span> },
   { key: "amount", label: "Сумма", render: (i: Loan) => fmt(i.amount) },
   { key: "rate", label: "Ставка", render: (i: Loan) => i.rate + "%" },
   { key: "term_months", label: "Срок", render: (i: Loan) => i.term_months + " мес." },
@@ -46,6 +47,7 @@ const columns: Column<Loan>[] = [
 const Loans = () => {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -58,7 +60,7 @@ const Loans = () => {
   const { toast } = useToast();
   const { isAdmin } = useAuth();
 
-  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
   const [preview, setPreview] = useState<ScheduleItem[] | null>(null);
   const [previewMonthly, setPreviewMonthly] = useState(0);
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
@@ -77,6 +79,7 @@ const Loans = () => {
   const load = () => {
     setLoading(true);
     Promise.all([api.loans.list(), api.members.list()]).then(([l, m]) => { setLoans(l); setMembers(m); }).finally(() => setLoading(false));
+    api.organizations.list().then(setOrgs).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -96,6 +99,7 @@ const Loans = () => {
         contract_no: form.contract_no, member_id: Number(form.member_id),
         amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
         schedule_type: form.schedule_type, start_date: form.start_date,
+        org_id: form.org_id ? Number(form.org_id) : undefined,
       });
       toast({ title: "Договор займа создан" });
       setShowForm(false);
@@ -313,7 +317,7 @@ const Loans = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Займы" description={`${loans.filter(l => l.status === "active").length} активных из ${loans.length} договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10) }); setPreview(null); setShowForm(true); }} />
+      <PageHeader title="Займы" description={`${loans.filter(l => l.status === "active").length} активных из ${loans.length} договоров`} actionLabel="Новый договор" actionIcon="Plus" onAction={() => { setForm({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" }); setPreview(null); setShowForm(true); }} />
 
       <div className="grid grid-cols-4 gap-4">
         <Card className="p-4"><div className="text-xs text-muted-foreground mb-1">Портфель займов</div><div className="text-xl font-bold">{fmt(totalPortfolio)}</div></Card>
@@ -335,6 +339,17 @@ const Loans = () => {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Новый договор займа</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Организация *</Label>
+              <Select value={String(form.org_id || "")} onValueChange={v => setForm(p => ({ ...p, org_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Выберите организацию" /></SelectTrigger>
+                <SelectContent>
+                  {orgs.map(o => (
+                    <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Пайщик *</Label>
               <MemberSearch members={members} value={form.member_id} onChange={(id) => setForm(p => ({ ...p, member_id: id }))} />

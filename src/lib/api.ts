@@ -97,7 +97,7 @@ export const api = {
   shares: {
     list: () => request<ShareAccount[]>("GET", { entity: "shares" }),
     get: (id: number) => request<ShareAccountDetail>("GET", { entity: "shares", action: "detail", id }),
-    create: (data: { member_id: number; amount: number }) => request<{ id: number; account_no: string }>("POST", undefined, { entity: "shares", action: "create", ...data }),
+    create: (data: { member_id: number; amount: number; org_id?: number }) => request<{ id: number; account_no: string }>("POST", undefined, { entity: "shares", action: "create", ...data }),
     transaction: (data: { account_id: number; amount: number; transaction_type: string; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "shares", action: "transaction", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
@@ -172,6 +172,15 @@ export const api = {
     get: () => request<OrgSettings>("GET", { entity: "org_settings" }),
     save: (settings: Partial<OrgSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "org_settings", settings }),
   },
+
+  organizations: {
+    list: () => request<Organization[]>("GET", { entity: "organizations" }),
+    get: (id: number) => request<Organization>("GET", { entity: "organizations", id }),
+    create: (data: Partial<Organization>) => request<{ id: number }>("POST", undefined, { entity: "organizations", action: "create", ...data }),
+    update: (data: Partial<Organization> & { id: number }) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "update", ...data }),
+    uploadLogo: (orgId: number, logoBase64: string) => request<{ success: boolean; logo_url: string }>("POST", undefined, { entity: "organizations", action: "upload_logo", id: orgId, logo: logoBase64 }),
+    delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "delete", id }),
+  },
 };
 
 export interface DashboardStats {
@@ -245,6 +254,9 @@ export interface Loan {
   monthly_payment: number;
   balance: number;
   status: string;
+  org_id?: number;
+  org_name?: string;
+  org_short_name?: string;
 }
 
 export interface ScheduleItem {
@@ -282,6 +294,7 @@ export interface CreateLoanData {
   term_months: number;
   schedule_type: string;
   start_date: string;
+  org_id?: number;
 }
 
 export interface OverpayOption {
@@ -321,6 +334,9 @@ export interface Saving {
   current_balance: number;
   status: string;
   min_balance_pct: number;
+  org_id?: number;
+  org_name?: string;
+  org_short_name?: string;
 }
 
 export interface SavingsScheduleItem {
@@ -364,6 +380,7 @@ export interface CreateSavingData {
   payout_type: string;
   start_date: string;
   min_balance_pct?: number;
+  org_id?: number;
 }
 
 export interface ShareAccount {
@@ -377,6 +394,9 @@ export interface ShareAccount {
   status: string;
   created_at: string;
   updated_at: string;
+  org_id?: number;
+  org_name?: string;
+  org_short_name?: string;
 }
 
 export interface ShareAccountDetail extends ShareAccount {
@@ -420,13 +440,6 @@ export interface AuthLoginResult {
   token?: string;
   user?: { name: string; member_id: number };
   error?: string;
-}
-
-export interface CabinetOverview {
-  info: { name: string; member_no: string; phone: string; email: string };
-  loans: Loan[];
-  savings: Saving[];
-  shares: ShareAccount[];
 }
 
 export interface CabinetSavingDetail extends Saving {
@@ -486,6 +499,39 @@ export interface OrgSettings {
   email: string;
   telegram: string;
   whatsapp: string;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  short_name: string;
+  inn: string;
+  ogrn: string;
+  kpp: string;
+  director_fio: string;
+  director_position: string;
+  legal_address: string;
+  actual_address: string;
+  bank_name: string;
+  bik: string;
+  rs: string;
+  ks: string;
+  phone: string;
+  email: string;
+  website: string;
+  telegram: string;
+  whatsapp: string;
+  logo_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CabinetOverview {
+  info: { name: string; member_no: string; phone: string; email: string };
+  loans: (Loan & { org_id?: number; org_name?: string; org_short_name?: string })[];
+  savings: (Saving & { org_id?: number; org_name?: string; org_short_name?: string })[];
+  shares: (ShareAccount & { org_id?: number; org_name?: string; org_short_name?: string })[];
 }
 
 export default api;

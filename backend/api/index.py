@@ -240,6 +240,10 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
             nr = cur.fetchone()
             loan['member_name'] = nr[0] if nr else ''
+            if loan.get('org_id'):
+                org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % loan['org_id'])
+                loan['org_name'] = org_row['name'] if org_row else ''
+                loan['org_short_name'] = org_row['short_name'] if org_row else ''
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
             loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
             return loan
@@ -254,9 +258,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             return query_rows(cur, """
                 SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type,
                        l.start_date, l.end_date, l.monthly_payment, l.balance, l.status,
+                       l.org_id,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
-                            ELSE m.company_name END as member_name, m.id as member_id
-                FROM loans l JOIN members m ON m.id=l.member_id ORDER BY l.created_at DESC
+                            ELSE m.company_name END as member_name, m.id as member_id,
+                       o.name as org_name, o.short_name as org_short_name
+                FROM loans l JOIN members m ON m.id=l.member_id
+                LEFT JOIN organizations o ON o.id=l.org_id
+                ORDER BY l.created_at DESC
             """)
 
     elif method == 'POST':
@@ -270,12 +278,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             ed = last_day_of_month(add_months(sd, t))
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
             schedule, monthly = fn(a, r, t, sd)
+            org_id = body.get('org_id')
 
             cur.execute("""
                 INSERT INTO loans (contract_no, member_id, amount, rate, term_months, schedule_type,
-                    start_date, end_date, monthly_payment, balance, status)
-                VALUES ('%s', %s, %s, %s, %s, '%s', '%s', '%s', %s, %s, 'active') RETURNING id
-            """ % (esc(cn), mid, a, r, t, st, sd.isoformat(), ed.isoformat(), monthly, a))
+                    start_date, end_date, monthly_payment, balance, status, org_id)
+                VALUES ('%s', %s, %s, %s, %s, '%s', '%s', '%s', %s, %s, 'active', %s) RETURNING id
+            """ % (esc(cn), mid, a, r, t, st, sd.isoformat(), ed.isoformat(), monthly, a, org_id if org_id else 'NULL'))
             lid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("""
@@ -597,6 +606,10 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % s['member_id'])
             nr = cur.fetchone()
             s['member_name'] = nr[0] if nr else ''
+            if s.get('org_id'):
+                org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % s['org_id'])
+                s['org_name'] = org_row['name'] if org_row else ''
+                s['org_short_name'] = org_row['short_name'] if org_row else ''
             today = date.today().isoformat()
             cur.execute("UPDATE savings_schedule SET status='accrued' WHERE saving_id=%s AND status='pending' AND period_end <= '%s'" % (params['id'], today))
             if cur.rowcount > 0:
@@ -621,10 +634,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             return query_rows(cur, """
                 SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type,
                        s.start_date, s.end_date, s.accrued_interest, s.paid_interest, s.current_balance, s.status,
-                       s.min_balance_pct,
+                       s.min_balance_pct, s.org_id,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
-                            ELSE m.company_name END as member_name, m.id as member_id
-                FROM savings s JOIN members m ON m.id=s.member_id ORDER BY s.created_at DESC
+                            ELSE m.company_name END as member_name, m.id as member_id,
+                       o.name as org_name, o.short_name as org_short_name
+                FROM savings s JOIN members m ON m.id=s.member_id
+                LEFT JOIN organizations o ON o.id=s.org_id
+                ORDER BY s.created_at DESC
             """)
 
     elif method == 'POST':
@@ -635,9 +651,10 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             pt = body.get('payout_type', 'monthly')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
             mbp = float(body.get('min_balance_pct', 0))
+            org_id = body.get('org_id')
             schedule = calc_savings_schedule(a, r, t, sd, pt)
             ed = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(sd, t - 1))
-            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp))
+            cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s,%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp, org_id if org_id else 'NULL'))
             sid = cur.fetchone()[0]
             for item in schedule:
                 cur.execute("INSERT INTO savings_schedule (saving_id,period_no,period_start,period_end,interest_amount,cumulative_interest,balance_after) VALUES (%s,%s,'%s','%s',%s,%s,%s)" % (sid, item['period_no'], item['period_start'], item['period_end'], item['interest_amount'], item['cumulative_interest'], item['balance_after']))
@@ -967,14 +984,22 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % acc['member_id'])
             nr = cur.fetchone()
             acc['member_name'] = nr[0] if nr else ''
+            if acc.get('org_id'):
+                org_row = query_one(cur, "SELECT name, short_name FROM organizations WHERE id=%s" % acc['org_id'])
+                acc['org_name'] = org_row['name'] if org_row else ''
+                acc['org_short_name'] = org_row['short_name'] if org_row else ''
             acc['transactions'] = query_rows(cur, "SELECT * FROM share_transactions WHERE account_id=%s ORDER BY transaction_date DESC" % params['id'])
             return acc
         else:
             return query_rows(cur, """
                 SELECT sa.id, sa.account_no, sa.balance, sa.total_in, sa.total_out, sa.status, sa.created_at, sa.updated_at,
+                       sa.org_id,
                        CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name)
-                            ELSE m.company_name END as member_name, m.id as member_id
-                FROM share_accounts sa JOIN members m ON m.id=sa.member_id ORDER BY sa.created_at DESC
+                            ELSE m.company_name END as member_name, m.id as member_id,
+                       o.name as org_name, o.short_name as org_short_name
+                FROM share_accounts sa JOIN members m ON m.id=sa.member_id
+                LEFT JOIN organizations o ON o.id=sa.org_id
+                ORDER BY sa.created_at DESC
             """)
 
     elif method == 'POST':
@@ -982,10 +1007,11 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
         if action == 'create':
             mid = int(body['member_id'])
             a = float(body.get('amount', 0))
+            org_id = body.get('org_id')
             cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM share_accounts")
             ni = cur.fetchone()[0]
             ano = 'ПС-%06d' % ni
-            cur.execute("INSERT INTO share_accounts (account_no,member_id,balance,total_in) VALUES ('%s',%s,%s,%s) RETURNING id, account_no" % (ano, mid, a, a))
+            cur.execute("INSERT INTO share_accounts (account_no,member_id,balance,total_in,org_id) VALUES ('%s',%s,%s,%s,%s) RETURNING id, account_no" % (ano, mid, a, a, org_id if org_id else 'NULL'))
             result = cur.fetchone()
             if a > 0:
                 cur.execute("INSERT INTO share_transactions (account_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'in','Первоначальный паевой взнос')" % (result[0], date.today().isoformat(), a))
@@ -1952,12 +1978,18 @@ def handle_export(params, cur):
     if not item_id:
         return None
 
-    org = load_org_settings(cur)
+    default_org = load_org_settings(cur)
 
     if export_type == 'loan':
         loan = query_one(cur, "SELECT * FROM loans WHERE id = %s" % item_id)
         if not loan:
             return None
+        org_id = loan.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else default_org
+        else:
+            org = default_org
         cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
         nr = cur.fetchone()
         member_name = nr[0] if nr else ''
@@ -1976,6 +2008,12 @@ def handle_export(params, cur):
         saving = query_one(cur, "SELECT * FROM savings WHERE id = %s" % item_id)
         if not saving:
             return None
+        org_id = saving.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else default_org
+        else:
+            org = default_org
         cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % saving['member_id'])
         nr = cur.fetchone()
         member_name = nr[0] if nr else ''
@@ -1994,6 +2032,12 @@ def handle_export(params, cur):
         saving = query_one(cur, "SELECT * FROM savings WHERE id = %s" % item_id)
         if not saving:
             return None
+        org_id = saving.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else default_org
+        else:
+            org = default_org
         cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % saving['member_id'])
         nr = cur.fetchone()
         member_name = nr[0] if nr else ''
@@ -2011,6 +2055,12 @@ def handle_export(params, cur):
         account = query_one(cur, "SELECT * FROM share_accounts WHERE id = %s" % item_id)
         if not account:
             return None
+        org_id = account.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else default_org
+        else:
+            org = default_org
         cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % account['member_id'])
         nr = cur.fetchone()
         member_name = nr[0] if nr else ''
@@ -2417,20 +2467,26 @@ def handle_cabinet(method, params, body, headers, cur):
         info = {'name': mr[0], 'member_no': mr[1], 'phone': mr[2], 'email': mr[3]} if mr else {}
 
         loans = query_rows(cur, """
-            SELECT id, contract_no, amount, rate, term_months, schedule_type, start_date, end_date,
-                   monthly_payment, balance, status
-            FROM loans WHERE member_id=%s ORDER BY created_at DESC
+            SELECT l.id, l.contract_no, l.amount, l.rate, l.term_months, l.schedule_type, l.start_date, l.end_date,
+                   l.monthly_payment, l.balance, l.status, l.org_id,
+                   o.name as org_name, o.short_name as org_short_name
+            FROM loans l LEFT JOIN organizations o ON o.id=l.org_id
+            WHERE l.member_id=%s ORDER BY l.created_at DESC
         """ % member_id)
 
         savings = query_rows(cur, """
-            SELECT id, contract_no, amount, rate, term_months, payout_type, start_date, end_date,
-                   accrued_interest, paid_interest, current_balance, status
-            FROM savings WHERE member_id=%s ORDER BY created_at DESC
+            SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type, s.start_date, s.end_date,
+                   s.accrued_interest, s.paid_interest, s.current_balance, s.status, s.org_id,
+                   o.name as org_name, o.short_name as org_short_name
+            FROM savings s LEFT JOIN organizations o ON o.id=s.org_id
+            WHERE s.member_id=%s ORDER BY s.created_at DESC
         """ % member_id)
 
         shares = query_rows(cur, """
-            SELECT id, account_no, balance, total_in, total_out, status
-            FROM share_accounts WHERE member_id=%s ORDER BY created_at DESC
+            SELECT sa.id, sa.account_no, sa.balance, sa.total_in, sa.total_out, sa.status, sa.org_id,
+                   o.name as org_name, o.short_name as org_short_name
+            FROM share_accounts sa LEFT JOIN organizations o ON o.id=sa.org_id
+            WHERE sa.member_id=%s ORDER BY sa.created_at DESC
         """ % member_id)
 
         return {'info': info, 'loans': loans, 'savings': savings, 'shares': shares}
@@ -2492,7 +2548,95 @@ def handle_org_settings(method, body, staff, cur, conn):
         return {'success': True}
     return {'error': 'Неизвестный метод'}
 
-PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings'}
+def handle_organizations(method, params, body, staff, cur, conn, ip=''):
+    if method == 'GET':
+        org_id = params.get('id')
+        if org_id:
+            return query_one(cur, "SELECT * FROM organizations WHERE id=%s AND is_active=true" % org_id)
+        return query_rows(cur, "SELECT * FROM organizations WHERE is_active=true ORDER BY name")
+
+    elif method == 'POST':
+        action = body.get('action', 'create')
+
+        if action == 'create':
+            if staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может создавать организации'}
+            cur.execute("""
+                INSERT INTO organizations (name, short_name, inn, ogrn, kpp, director_fio, director_position,
+                    legal_address, actual_address, bank_name, bik, rs, ks, phone, email, website, telegram, whatsapp, logo_url)
+                VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+                RETURNING id
+            """ % (
+                esc(body.get('name', '')), esc(body.get('short_name', '')), esc(body.get('inn', '')),
+                esc(body.get('ogrn', '')), esc(body.get('kpp', '')), esc(body.get('director_fio', '')),
+                esc(body.get('director_position', '')), esc(body.get('legal_address', '')),
+                esc(body.get('actual_address', '')), esc(body.get('bank_name', '')),
+                esc(body.get('bik', '')), esc(body.get('rs', '')), esc(body.get('ks', '')),
+                esc(body.get('phone', '')), esc(body.get('email', '')), esc(body.get('website', '')),
+                esc(body.get('telegram', '')), esc(body.get('whatsapp', '')), esc(body.get('logo_url', ''))
+            ))
+            org_id = cur.fetchone()[0]
+            audit_log(cur, staff, 'create', 'organization', org_id, esc(body.get('name', '')), '', ip)
+            conn.commit()
+            return {'id': org_id}
+
+        elif action == 'update':
+            if staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может редактировать организации'}
+            org_id = body.get('id')
+            if not org_id:
+                return {'error': 'Не указан id организации'}
+            fields = []
+            allowed = ('name', 'short_name', 'inn', 'ogrn', 'kpp', 'director_fio', 'director_position',
+                        'legal_address', 'actual_address', 'bank_name', 'bik', 'rs', 'ks',
+                        'phone', 'email', 'website', 'telegram', 'whatsapp', 'logo_url')
+            for k in allowed:
+                if k in body:
+                    fields.append("%s='%s'" % (k, esc(body[k])))
+            if fields:
+                fields.append("updated_at=NOW()")
+                cur.execute("UPDATE organizations SET %s WHERE id=%s" % (', '.join(fields), org_id))
+            audit_log(cur, staff, 'update', 'organization', org_id, esc(body.get('name', '')), '', ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'upload_logo':
+            if staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может загружать логотип'}
+            org_id = body.get('id')
+            if not org_id:
+                return {'error': 'Не указан id организации'}
+            logo_b64 = body.get('logo')
+            if not logo_b64:
+                return {'error': 'Не передан логотип'}
+            import boto3
+            logo_data = base64.b64decode(logo_b64)
+            s3 = boto3.client('s3',
+                endpoint_url='https://bucket.poehali.dev',
+                aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+                aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'])
+            s3_key = 'org_logos/%s.png' % org_id
+            s3.put_object(Bucket='files', Key=s3_key, Body=logo_data, ContentType='image/png')
+            cdn_url = 'https://cdn.poehali.dev/projects/%s/bucket/%s' % (os.environ['AWS_ACCESS_KEY_ID'], s3_key)
+            cur.execute("UPDATE organizations SET logo_url='%s', updated_at=NOW() WHERE id=%s" % (esc(cdn_url), org_id))
+            audit_log(cur, staff, 'upload_logo', 'organization', org_id, '', '', ip)
+            conn.commit()
+            return {'success': True, 'logo_url': cdn_url}
+
+        elif action == 'delete':
+            if staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Только администратор может удалять организации'}
+            org_id = body.get('id')
+            if not org_id:
+                return {'error': 'Не указан id организации'}
+            cur.execute("UPDATE organizations SET is_active=false, updated_at=NOW() WHERE id=%s" % org_id)
+            audit_log(cur, staff, 'delete', 'organization', org_id, '', '', ip)
+            conn.commit()
+            return {'success': True}
+
+    return {'error': 'Неизвестный метод'}
+
+PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
 def handler(event, context):
     """Единый API для ERP кредитного кооператива: пайщики, займы, сбережения, паевые счета, ЛК, авторизация"""
@@ -2546,6 +2690,8 @@ def handler(event, context):
             result = handle_audit(params, staff, cur)
         elif entity == 'org_settings':
             result = handle_org_settings(method, body, staff, cur, conn)
+        elif entity == 'organizations':
+            result = handle_organizations(method, params, body, staff, cur, conn, src_ip)
         elif entity == 'staff_auth':
             result = handle_staff_auth(body, cur, conn, src_ip)
         elif entity == 'auth':

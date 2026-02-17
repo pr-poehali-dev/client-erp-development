@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +87,17 @@ const Cabinet = () => {
     }
   };
 
+  const orgGroups = useMemo(() => {
+    if (!data) return [];
+    const orgMap = new Map<number, string>();
+    [...data.loans, ...data.savings, ...data.shares].forEach(item => {
+      const oid = item.org_id;
+      const oname = item.org_short_name || item.org_name;
+      if (oid && oname) orgMap.set(oid, oname);
+    });
+    return Array.from(orgMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [data]);
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-slate-100">
       <Icon name="Loader2" size={40} className="animate-spin text-primary" />
@@ -98,6 +109,92 @@ const Cabinet = () => {
   const totalLoanBalance = data.loans.filter(l => l.status === "active").reduce((s, l) => s + l.balance, 0);
   const totalSavings = data.savings.filter(s => s.status === "active").reduce((s, i) => s + (i.current_balance || i.amount), 0);
   const totalShares = data.shares.reduce((s, a) => s + a.balance, 0);
+
+  const renderLoanCards = (loans: typeof data.loans) => (
+    loans.length === 0 ? (
+      <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет договоров займа</Card>
+    ) : loans.map(loan => (
+      <Card key={loan.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openLoan(loan)}>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Icon name="FileText" size={16} className="text-muted-foreground" />
+              <span className="font-semibold text-sm">{loan.contract_no}</span>
+            </div>
+            <Badge variant={statusVariant(loan.status) as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[loan.status] || loan.status}</Badge>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><div className="text-xs text-muted-foreground">Сумма</div><div className="font-medium">{fmt(loan.amount)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{loan.rate}%</div></div>
+            <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
+          </div>
+          <div className="text-xs text-muted-foreground mt-2">{fmtDate(loan.start_date)} — {fmtDate(loan.end_date)} / {loan.term_months} мес.</div>
+        </CardContent>
+      </Card>
+    ))
+  );
+
+  const renderSavingCards = (savings: typeof data.savings) => (
+    savings.length === 0 ? (
+      <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет договоров сбережений</Card>
+    ) : savings.map(s => (
+      <Card key={s.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openSaving(s)}>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Icon name="PiggyBank" size={16} className="text-muted-foreground" />
+              <span className="font-semibold text-sm">{s.contract_no}</span>
+            </div>
+            <Badge variant={s.status === "active" ? "default" : "secondary"} className="text-xs">{s.status === "active" ? "Активен" : "Закрыт"}</Badge>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="font-medium">{fmt(s.amount)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{s.rate}%</div></div>
+            <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="font-medium text-green-600">{fmt(s.accrued_interest)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(s.current_balance || s.amount)}</div></div>
+          </div>
+          <div className="text-xs text-muted-foreground mt-2">{fmtDate(s.start_date)} — {fmtDate(s.end_date)} / {s.term_months} мес. / {s.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div>
+        </CardContent>
+      </Card>
+    ))
+  );
+
+  const renderShareCards = (shares: typeof data.shares) => (
+    shares.length === 0 ? (
+      <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет паевых счетов</Card>
+    ) : shares.map(a => (
+      <Card key={a.id}>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Icon name="Wallet" size={16} className="text-muted-foreground" />
+              <span className="font-semibold text-sm">{a.account_no}</span>
+            </div>
+            <Badge variant="default" className="text-xs">Активен</Badge>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(a.balance)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Всего внесено</div><div className="font-medium">{fmt(a.total_in)}</div></div>
+            <div><div className="text-xs text-muted-foreground">Всего выплачено</div><div className="font-medium">{fmt(a.total_out)}</div></div>
+          </div>
+        </CardContent>
+      </Card>
+    ))
+  );
+
+  const renderProductTabs = (loans: typeof data.loans, savings: typeof data.savings, shares: typeof data.shares) => (
+    <Tabs defaultValue="loans" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="loans" className="gap-1.5"><Icon name="FileText" size={14} />Займы ({loans.length})</TabsTrigger>
+        <TabsTrigger value="savings" className="gap-1.5"><Icon name="PiggyBank" size={14} />Сбережения ({savings.length})</TabsTrigger>
+        <TabsTrigger value="shares" className="gap-1.5"><Icon name="Wallet" size={14} />Паевые ({shares.length})</TabsTrigger>
+      </TabsList>
+      <TabsContent value="loans" className="space-y-3">{renderLoanCards(loans)}</TabsContent>
+      <TabsContent value="savings" className="space-y-3">{renderSavingCards(savings)}</TabsContent>
+      <TabsContent value="shares" className="space-y-3">{renderShareCards(shares)}</TabsContent>
+    </Tabs>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100">
@@ -154,86 +251,29 @@ const Cabinet = () => {
           </Card>
         </div>
 
-        <Tabs defaultValue="loans" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="loans" className="gap-1.5"><Icon name="FileText" size={14} />Займы ({data.loans.length})</TabsTrigger>
-            <TabsTrigger value="savings" className="gap-1.5"><Icon name="PiggyBank" size={14} />Сбережения ({data.savings.length})</TabsTrigger>
-            <TabsTrigger value="shares" className="gap-1.5"><Icon name="Wallet" size={14} />Паевые ({data.shares.length})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="loans" className="space-y-3">
-            {data.loans.length === 0 ? (
-              <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет договоров займа</Card>
-            ) : data.loans.map(loan => (
-              <Card key={loan.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openLoan(loan)}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Icon name="FileText" size={16} className="text-muted-foreground" />
-                      <span className="font-semibold text-sm">{loan.contract_no}</span>
-                    </div>
-                    <Badge variant={statusVariant(loan.status) as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[loan.status] || loan.status}</Badge>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div><div className="text-xs text-muted-foreground">Сумма</div><div className="font-medium">{fmt(loan.amount)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{loan.rate}%</div></div>
-                    <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">{fmtDate(loan.start_date)} — {fmtDate(loan.end_date)} / {loan.term_months} мес.</div>
-                </CardContent>
-              </Card>
-            ))}
-          </TabsContent>
-
-          <TabsContent value="savings" className="space-y-3">
-            {data.savings.length === 0 ? (
-              <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет договоров сбережений</Card>
-            ) : data.savings.map(s => (
-              <Card key={s.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openSaving(s)}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Icon name="PiggyBank" size={16} className="text-muted-foreground" />
-                      <span className="font-semibold text-sm">{s.contract_no}</span>
-                    </div>
-                    <Badge variant={s.status === "active" ? "default" : "secondary"} className="text-xs">{s.status === "active" ? "Активен" : "Закрыт"}</Badge>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="font-medium">{fmt(s.amount)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{s.rate}%</div></div>
-                    <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="font-medium text-green-600">{fmt(s.accrued_interest)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(s.current_balance || s.amount)}</div></div>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">{fmtDate(s.start_date)} — {fmtDate(s.end_date)} / {s.term_months} мес. / {s.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div>
-                </CardContent>
-              </Card>
-            ))}
-          </TabsContent>
-
-          <TabsContent value="shares" className="space-y-3">
-            {data.shares.length === 0 ? (
-              <Card className="p-8 text-center text-muted-foreground text-sm">У вас нет паевых счетов</Card>
-            ) : data.shares.map((a: ShareAccount) => (
-              <Card key={a.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Icon name="Wallet" size={16} className="text-muted-foreground" />
-                      <span className="font-semibold text-sm">{a.account_no}</span>
-                    </div>
-                    <Badge variant="default" className="text-xs">Активен</Badge>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 text-sm">
-                    <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(a.balance)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Всего внесено</div><div className="font-medium">{fmt(a.total_in)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Всего выплачено</div><div className="font-medium">{fmt(a.total_out)}</div></div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </TabsContent>
-        </Tabs>
+        {orgGroups.length <= 1 ? (
+          renderProductTabs(data.loans, data.savings, data.shares)
+        ) : (
+          <Tabs defaultValue={String(orgGroups[0]?.id)} className="space-y-4">
+            <TabsList>
+              {orgGroups.map(og => (
+                <TabsTrigger key={og.id} value={String(og.id)} className="gap-1.5">
+                  <Icon name="Building2" size={14} />{og.name}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {orgGroups.map(og => {
+              const orgLoans = data.loans.filter(l => l.org_id === og.id);
+              const orgSavings = data.savings.filter(s => s.org_id === og.id);
+              const orgShares = data.shares.filter(a => a.org_id === og.id);
+              return (
+                <TabsContent key={og.id} value={String(og.id)} className="space-y-4">
+                  {renderProductTabs(orgLoans, orgSavings, orgShares)}
+                </TabsContent>
+              );
+            })}
+          </Tabs>
+        )}
       </main>
 
       <Dialog open={showLoan} onOpenChange={setShowLoan}>

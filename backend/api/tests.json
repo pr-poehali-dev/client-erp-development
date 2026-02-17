@@ -10,5 +10,6 @@
   {"name": "Cabinet unauthorized", "method": "GET", "path": "/?entity=cabinet&action=overview&token=invalid", "expectedStatus": 401},
   {"name": "CORS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
   {"name": "Cron daily accrue", "method": "POST", "path": "/", "body": {"entity": "cron", "action": "daily_accrue"}, "expectedStatus": 201, "expectedBody": {"success": true}, "bodyMatcher": "partial"},
-  {"name": "Org settings requires auth", "method": "GET", "path": "/?entity=org_settings", "expectedStatus": 401}
+  {"name": "Org settings requires auth", "method": "GET", "path": "/?entity=org_settings", "expectedStatus": 401},
+  {"name": "Organizations requires auth", "method": "GET", "path": "/?entity=organizations", "expectedStatus": 401}
 ]}
