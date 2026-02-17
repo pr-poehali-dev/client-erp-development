@@ -150,6 +150,18 @@ const Admin = () => {
     reader.readAsDataURL(file);
   };
 
+  const handleLogoDelete = async () => {
+    if (!editOrg) return;
+    try {
+      await api.organizations.update({ id: editOrg.id, logo_url: "" });
+      setOrgForm(prev => ({ ...prev, logo_url: "" }));
+      toast({ title: "Логотип удалён" });
+      loadOrgs();
+    } catch (err) {
+      toast({ title: "Ошибка", description: String(err), variant: "destructive" });
+    }
+  };
+
   const deleteOrg = async (org: Organization) => {
     if (!confirm(`Удалить организацию "${org.name}"?`)) return;
     try {
@@ -795,7 +807,12 @@ const Admin = () => {
             {editOrg && (
               <div className="flex items-center gap-4">
                 {orgForm.logo_url ? (
-                  <img src={orgForm.logo_url} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                  <div className="relative group">
+                    <img src={orgForm.logo_url} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                    <button onClick={handleLogoDelete} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" title="Удалить логотип">
+                      <Icon name="X" size={12} />
+                    </button>
+                  </div>
                 ) : (
                   <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center">
                     <Icon name="Image" size={24} className="text-muted-foreground" />
