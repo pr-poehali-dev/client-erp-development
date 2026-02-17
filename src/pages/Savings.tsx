@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Saving, SavingDetail, SavingTransaction, Member, SavingsScheduleItem, Organization } from "@/lib/api";
+import api, { Saving, SavingDetail, SavingTransaction, DailyAccrual, Member, SavingsScheduleItem, Organization } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -65,6 +65,7 @@ const Savings = () => {
   const [withdrawalForm, setWithdrawalForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
   const [showModifyTerm, setShowModifyTerm] = useState(false);
   const [modifyTermForm, setModifyTermForm] = useState({ new_term: "" });
+  const [txFilterState, setTxFilterState] = useState<"all" | "transactions" | "accruals">("all");
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
 
@@ -462,67 +463,121 @@ const Savings = () => {
                 </TabsContent>
 
                 <TabsContent value="transactions" className="mt-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-sm text-muted-foreground">
-                      Всего транзакций: <span className="font-medium text-foreground">{detail.transactions.length}</span>
-                    </div>
-                    {detail.transactions.length > 0 && (
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "xlsx"); toast({ title: "Формируется Excel-выписка по транзакциям..." }); }}>
-                          <Icon name="FileSpreadsheet" size={14} className="text-green-600" />
-                          <span className="text-xs">Excel</span>
-                        </Button>
-                        <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "pdf"); toast({ title: "Формируется PDF-выписка по транзакциям..." }); }}>
-                          <Icon name="FileText" size={14} className="text-red-500" />
-                          <span className="text-xs">PDF</span>
-                        </Button>
+                  {(() => {
+                    type UnifiedRow = { kind: "tx"; data: SavingTransaction } | { kind: "accrual"; data: DailyAccrual };
+                    const accrualRows: UnifiedRow[] = (detail.daily_accruals || []).map(a => ({ kind: "accrual" as const, data: a }));
+                    const txRows: UnifiedRow[] = detail.transactions.map(t => ({ kind: "tx" as const, data: t }));
+                    const allRows = [...txRows, ...accrualRows].sort((a, b) => {
+                      const dA = a.kind === "tx" ? a.data.transaction_date : a.data.accrual_date;
+                      const dB = b.kind === "tx" ? b.data.transaction_date : b.data.accrual_date;
+                      return dA.localeCompare(dB);
+                    });
+                    const [txFilter, setTxFilter] = [txFilterState, setTxFilterState];
+                    const filtered = txFilter === "all" ? allRows : txFilter === "accruals" ? allRows.filter(r => r.kind === "accrual") : allRows.filter(r => r.kind === "tx");
+                    const accrualSum = accrualRows.reduce((s, r) => s + Number(r.data.daily_amount), 0);
+                    return <>
+                      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="text-sm text-muted-foreground">
+                            Записей: <span className="font-medium text-foreground">{filtered.length}</span>
+                          </div>
+                          <div className="flex rounded-md border overflow-hidden text-xs">
+                            <button className={`px-2.5 py-1 ${txFilter === "all" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} onClick={() => setTxFilterState("all")}>Все</button>
+                            <button className={`px-2.5 py-1 border-l ${txFilter === "transactions" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} onClick={() => setTxFilterState("transactions")}>Операции</button>
+                            <button className={`px-2.5 py-1 border-l ${txFilter === "accruals" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`} onClick={() => setTxFilterState("accruals")}>Начисления %</button>
+                          </div>
+                        </div>
+                        {detail.transactions.length > 0 && (
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "xlsx"); toast({ title: "Формируется Excel-выписка по транзакциям..." }); }}>
+                              <Icon name="FileSpreadsheet" size={14} className="text-green-600" />
+                              <span className="text-xs">Excel</span>
+                            </Button>
+                            <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => { api.export.download("saving_transactions", detail.id, "pdf"); toast({ title: "Формируется PDF-выписка по транзакциям..." }); }}>
+                              <Icon name="FileText" size={14} className="text-red-500" />
+                              <span className="text-xs">PDF</span>
+                            </Button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  {detail.transactions.length === 0 ? (
-                    <Card className="p-6 text-center text-muted-foreground text-sm">Транзакций пока нет</Card>
-                  ) : (
-                    <Card><CardContent className="pt-4">
-                      <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                      <table className="w-full text-sm">
-                        <thead><tr className="border-b text-xs text-muted-foreground">
-                          <th className="text-left py-2 px-2 w-8">№</th>
-                          <th className="text-left py-2 px-2">Дата</th><th className="text-right py-2 px-2">Сумма</th>
-                          <th className="text-left py-2 px-2">Тип</th><th className="text-left py-2 px-2">Описание</th>
-                          <th className="text-center py-2 px-2 w-20"></th>
-                        </tr></thead>
-                        <tbody>{detail.transactions.map((tx, idx) => (
-                          <tr key={tx.id} className="border-b last:border-0 hover:bg-muted/30">
-                            <td className="py-2 px-2 text-xs text-muted-foreground">{idx + 1}</td>
-                            <td className="py-2 px-2">{fmtDate(tx.transaction_date)}</td>
-                            <td className="py-2 px-2 text-right font-medium">{tx.amount > 0 ? fmt(tx.amount) : "—"}</td>
-                            <td className="py-2 px-2">
-                              <Badge variant={
-                                tx.transaction_type === "opening" ? "default" :
-                                tx.transaction_type === "deposit" ? "default" :
-                                tx.transaction_type === "interest_payout" ? "secondary" :
-                                tx.transaction_type === "interest_accrual" ? "secondary" :
-                                tx.transaction_type === "withdrawal" || tx.transaction_type === "early_close" ? "destructive" :
-                                "outline"
-                              } className="text-xs">
-                                {ttLabels[tx.transaction_type] || tx.transaction_type}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-2 text-xs text-muted-foreground max-w-[200px] truncate" title={tx.description}>{tx.description}</td>
-                            <td className="py-2 px-2 text-center">
-                              {!["opening", "interest_accrual", "term_change", "rate_change"].includes(tx.transaction_type) && (
-                              <div className="flex gap-1 justify-center">
-                                <button className="p-1 rounded hover:bg-muted" title="Редактировать" onClick={() => openEditTx(tx)}><Icon name="Pencil" size={14} className="text-muted-foreground" /></button>
-                                <button className="p-1 rounded hover:bg-destructive/10" title="Удалить" onClick={() => handleDeleteTx(tx)}><Icon name="Trash2" size={14} className="text-destructive/70" /></button>
-                              </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))}</tbody>
-                      </table>
-                      </div>
-                    </CardContent></Card>
-                  )}
+                      {txFilter === "accruals" && accrualRows.length > 0 && (
+                        <Card className="mb-3 border-blue-200 bg-blue-50/50"><CardContent className="py-2.5 px-4">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Итого начислено за <span className="font-medium text-foreground">{accrualRows.length}</span> дн.</span>
+                            <span className="font-semibold text-blue-700">{fmt(accrualSum)}</span>
+                          </div>
+                        </CardContent></Card>
+                      )}
+                      {filtered.length === 0 ? (
+                        <Card className="p-6 text-center text-muted-foreground text-sm">Записей пока нет</Card>
+                      ) : (
+                        <Card><CardContent className="pt-4">
+                          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-card z-10"><tr className="border-b text-xs text-muted-foreground">
+                              <th className="text-left py-2 px-2 w-8">№</th>
+                              <th className="text-left py-2 px-2">Дата</th>
+                              <th className="text-right py-2 px-2">Сумма</th>
+                              <th className="text-left py-2 px-2">Тип</th>
+                              <th className="text-left py-2 px-2">Описание</th>
+                              <th className="text-center py-2 px-2 w-20"></th>
+                            </tr></thead>
+                            <tbody>{filtered.map((row, idx) => {
+                              if (row.kind === "accrual") {
+                                const a = row.data;
+                                return (
+                                  <tr key={"ac-" + a.id} className="border-b last:border-0 hover:bg-blue-50/40">
+                                    <td className="py-1.5 px-2 text-xs text-muted-foreground">{idx + 1}</td>
+                                    <td className="py-1.5 px-2 text-xs">{fmtDate(a.accrual_date)}</td>
+                                    <td className="py-1.5 px-2 text-right text-xs font-medium text-blue-700">+{fmt(Number(a.daily_amount))}</td>
+                                    <td className="py-1.5 px-2">
+                                      <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-700 bg-blue-50">
+                                        <Icon name="TrendingUp" size={10} className="mr-0.5" />Начисление %
+                                      </Badge>
+                                    </td>
+                                    <td className="py-1.5 px-2 text-[11px] text-muted-foreground">
+                                      Баланс: {fmt(Number(a.balance))}, ставка: {Number(a.rate)}%
+                                    </td>
+                                    <td className="py-1.5 px-2"></td>
+                                  </tr>
+                                );
+                              }
+                              const tx = row.data;
+                              return (
+                                <tr key={"tx-" + tx.id} className="border-b last:border-0 hover:bg-muted/30">
+                                  <td className="py-2 px-2 text-xs text-muted-foreground">{idx + 1}</td>
+                                  <td className="py-2 px-2">{fmtDate(tx.transaction_date)}</td>
+                                  <td className="py-2 px-2 text-right font-medium">{tx.amount > 0 ? fmt(tx.amount) : "—"}</td>
+                                  <td className="py-2 px-2">
+                                    <Badge variant={
+                                      tx.transaction_type === "opening" ? "default" :
+                                      tx.transaction_type === "deposit" ? "default" :
+                                      tx.transaction_type === "interest_payout" ? "secondary" :
+                                      tx.transaction_type === "interest_accrual" ? "secondary" :
+                                      tx.transaction_type === "withdrawal" || tx.transaction_type === "early_close" ? "destructive" :
+                                      "outline"
+                                    } className="text-xs">
+                                      {ttLabels[tx.transaction_type] || tx.transaction_type}
+                                    </Badge>
+                                  </td>
+                                  <td className="py-2 px-2 text-xs text-muted-foreground max-w-[200px] truncate" title={tx.description}>{tx.description}</td>
+                                  <td className="py-2 px-2 text-center">
+                                    {!["opening", "interest_accrual", "term_change", "rate_change"].includes(tx.transaction_type) && (
+                                    <div className="flex gap-1 justify-center">
+                                      <button className="p-1 rounded hover:bg-muted" title="Редактировать" onClick={() => openEditTx(tx)}><Icon name="Pencil" size={14} className="text-muted-foreground" /></button>
+                                      <button className="p-1 rounded hover:bg-destructive/10" title="Удалить" onClick={() => handleDeleteTx(tx)}><Icon name="Trash2" size={14} className="text-destructive/70" /></button>
+                                    </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}</tbody>
+                          </table>
+                          </div>
+                        </CardContent></Card>
+                      )}
+                    </>;
+                  })()}
                 </TabsContent>
 
                 <TabsContent value="actions" className="mt-4">

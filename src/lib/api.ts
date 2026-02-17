@@ -352,9 +352,19 @@ export interface SavingsScheduleItem {
   paid_amount?: number;
 }
 
+export interface DailyAccrual {
+  id: number;
+  accrual_date: string;
+  balance: number;
+  rate: number;
+  daily_amount: number;
+  created_at: string;
+}
+
 export interface SavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
   transactions: SavingTransaction[];
+  daily_accruals: DailyAccrual[];
   total_daily_accrued: number;
   max_payout: number;
   accrual_first_date: string | null;

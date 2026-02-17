@@ -616,6 +616,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 conn.commit()
             s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % params['id'])
             s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % params['id'])
+            s['daily_accruals'] = query_rows(cur, "SELECT id, accrual_date, balance, rate, daily_amount, created_at FROM savings_daily_accruals WHERE saving_id=%s ORDER BY accrual_date" % params['id'])
             cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % params['id'])
             s['total_daily_accrued'] = float(cur.fetchone()[0])
             s['max_payout'] = float(get_accrued_interest_end_of_prev_month(cur, int(params['id'])))
