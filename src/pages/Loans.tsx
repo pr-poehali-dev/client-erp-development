@@ -167,11 +167,28 @@ const Loans = () => {
       setEarlyMonthly(0);
       return;
     }
-    const paidCount = detail.schedule.filter(s => s.status === "paid").length;
-    const remainingTerm = earlyForm.repayment_type === "reduce_payment"
-      ? detail.term_months - paidCount
-      : Math.max(Math.ceil(newBalance / (detail.monthly_payment / 2)), 1);
-    const res = await api.loans.calcSchedule(newBalance, detail.rate, Math.max(remainingTerm, 1), detail.schedule_type, earlyForm.date);
+    const remainingPeriods = detail.schedule.filter(s => s.status !== "paid").length;
+    let remainingTerm: number;
+    if (earlyForm.repayment_type === "reduce_payment") {
+      remainingTerm = Math.max(remainingPeriods, 1);
+    } else {
+      if (detail.monthly_payment > 0) {
+        let bestTerm = Math.max(remainingPeriods, 1);
+        for (let t = 1; t <= remainingPeriods; t++) {
+          try {
+            const test = await api.loans.calcSchedule(newBalance, detail.rate, t, detail.schedule_type, earlyForm.date);
+            if (test.monthly_payment >= detail.monthly_payment * 0.9) {
+              bestTerm = t;
+              break;
+            }
+          } catch { break; }
+        }
+        remainingTerm = Math.max(bestTerm, 1);
+      } else {
+        remainingTerm = Math.max(remainingPeriods, 1);
+      }
+    }
+    const res = await api.loans.calcSchedule(newBalance, detail.rate, remainingTerm, detail.schedule_type, earlyForm.date);
     setEarlyPreview(res.schedule);
     setEarlyMonthly(res.monthly_payment);
   };

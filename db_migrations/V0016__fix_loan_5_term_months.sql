@@ -1,0 +1,1 @@
+UPDATE t_p25513958_client_erp_developme.loans SET term_months = 60 WHERE id = 5 AND contract_no = '100-000032123154';

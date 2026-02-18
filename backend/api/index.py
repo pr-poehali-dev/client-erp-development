@@ -473,36 +473,49 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             rt = body.get('repayment_type', 'reduce_term')
             pd = body.get('payment_date', date.today().isoformat())
 
-            cur.execute("SELECT amount, rate, balance, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
+            cur.execute("SELECT amount, rate, balance, term_months, start_date, schedule_type, monthly_payment FROM loans WHERE id=%s" % lid)
             lr = cur.fetchone()
             cb, r, st = float(lr[2]), float(lr[1]), lr[5]
+            old_monthly = float(lr[6]) if lr[6] else 0
             nb = cb - amt
 
             if nb <= 0:
                 cur.execute("UPDATE loans SET balance=0, status='closed', updated_at=NOW() WHERE id=%s" % lid)
-                cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+                cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                 cur.execute("INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, payment_type) VALUES (%s,'%s',%s,%s,'early_full')" % (lid, pd, amt, cb))
                 audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Полное досрочное погашение: %s' % amt, ip)
                 conn.commit()
                 return {'success': True, 'new_balance': 0, 'status': 'closed'}
 
-            cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+            cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+            remaining_periods = cur.fetchone()[0]
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
             cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
             paid_count = cur.fetchone()[0]
 
-            if rt == 'reduce_payment':
-                nt = int(lr[3]) - paid_count
-            else:
-                mp = float(lr[2]) if lr[2] else 0
-                nt = max(int(nb / max(mp / 2, 1)), 1)
-
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
-            ns, nm = fn(nb, r, max(nt, 1), date.fromisoformat(pd))
+
+            if rt == 'reduce_payment':
+                nt = max(remaining_periods, 1)
+            else:
+                if old_monthly > 0:
+                    best_term = max(remaining_periods, 1)
+                    for t in range(1, remaining_periods + 1):
+                        _, m = fn(nb, r, t, date.fromisoformat(pd))
+                        if m >= old_monthly * 0.9:
+                            best_term = t
+                            break
+                    nt = max(best_term, 1)
+                else:
+                    nt = max(remaining_periods, 1)
+
+            ns, nm = fn(nb, r, nt, date.fromisoformat(pd))
             for item in ns:
-                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, paid_count + item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
 
             ne = date.fromisoformat(ns[-1]['payment_date'])
-            cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), nt, lid))
+            total_term = paid_count + len(ns)
+            cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (nb, nm, ne.isoformat(), total_term, lid))
             cur.execute("INSERT INTO loan_payments (loan_id,payment_date,amount,principal_part,payment_type) VALUES (%s,'%s',%s,%s,'early_partial')" % (lid, pd, amt, amt))
             refresh_loan_overdue_status(cur, lid)
             audit_log(cur, staff, 'early_repayment', 'loan', lid, '', 'Частичное: %s, тип: %s' % (amt, rt), ip)
@@ -566,13 +579,23 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'delete_all_payments':
             lid = int(body['loan_id'])
-            cur.execute("SELECT amount FROM loans WHERE id=%s" % lid)
+            cur.execute("SELECT amount, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
             lr = cur.fetchone()
             if not lr:
                 return {'error': 'Договор не найден'}
+            orig_amount = float(lr[0])
+            r = float(lr[1])
+            orig_term = int(lr[2])
+            sd = date.fromisoformat(str(lr[3]))
+            st = lr[4]
             cur.execute("DELETE FROM loan_payments WHERE loan_id=%s" % lid)
-            cur.execute("UPDATE loan_schedule SET status='pending', paid_amount=0, paid_date=NULL WHERE loan_id=%s" % lid)
-            cur.execute("UPDATE loans SET balance=%s, status='active', updated_at=NOW() WHERE id=%s" % (float(lr[0]), lid))
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            ns, m = fn(orig_amount, r, orig_term, sd)
+            for item in ns:
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+            ne = date.fromisoformat(ns[-1]['payment_date'])
+            cur.execute("UPDATE loans SET balance=%s, monthly_payment=%s, term_months=%s, end_date='%s', status='active', updated_at=NOW() WHERE id=%s" % (orig_amount, m, orig_term, ne.isoformat(), lid))
             audit_log(cur, staff, 'delete_all_payments', 'loan', lid, '', '', ip)
             conn.commit()
             return {'success': True}
@@ -586,13 +609,16 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             t = int(body['new_term']) if body.get('new_term') else int(lr[2])
             st = lr[4]
 
-            cur.execute("UPDATE loan_schedule SET status='paid' WHERE loan_id=%s AND status='pending'" % lid)
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+            cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
+            paid_count = cur.fetchone()[0]
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
             ns, m = fn(bal, r, t, date.today())
             for item in ns:
-                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, paid_count + item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
             ne = date.fromisoformat(ns[-1]['payment_date'])
-            cur.execute("UPDATE loans SET rate=%s, term_months=%s, monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (r, t, m, ne.isoformat(), lid))
+            total_term = paid_count + len(ns)
+            cur.execute("UPDATE loans SET rate=%s, term_months=%s, monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (r, total_term, m, ne.isoformat(), lid))
             audit_log(cur, staff, 'modify', 'loan', lid, '', 'Ставка: %s%%, срок: %s мес.' % (r, t), ip)
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
