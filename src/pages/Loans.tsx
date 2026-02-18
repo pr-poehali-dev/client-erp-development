@@ -142,6 +142,9 @@ const Loans = () => {
       let title = "Платёж внесён";
       if (res.new_balance === 0) {
         title = "Займ полностью погашен";
+      } else if (res.schedule_recalculated && res.auto_recalculated) {
+        title = "Платёж внесён, проценты пересчитаны";
+        parts.push(`Новый платёж: ${fmt(res.new_monthly || 0)}`);
       } else if (res.schedule_recalculated) {
         title = "Платёж внесён, график пересчитан";
         parts.push(`Новый платёж: ${fmt(res.new_monthly || 0)}`);
