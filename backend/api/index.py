@@ -335,7 +335,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             old_monthly = float(loan_row[4])
 
             cur.execute("""
-                SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
+                SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
                 ORDER BY payment_no LIMIT 1
             """ % lid)
@@ -345,9 +345,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 f_si = Decimal(str(first_row[2]))
                 f_spn = Decimal(str(first_row[3]))
                 f_spa = Decimal(str(first_row[4]))
+                f_pay_date = first_row[5]
                 current_owed = f_sp + f_si + f_spn - f_spa
             else:
                 current_owed = loan_bal
+                f_pay_date = date.fromisoformat(pd)
 
             has_overpay = amt > current_owed and amt < loan_bal
             if has_overpay and not overpay_strategy:
@@ -360,18 +362,22 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     new_bal_est = Decimal('0')
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                 remaining_periods = cur.fetchone()[0]
+                remaining_after = remaining_periods - 1
+                sched_start = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
                 options = {}
-                if remaining_periods > 1 and float(new_bal_est) > 0:
+                if remaining_after >= 1 and float(new_bal_est) > 0:
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
-                    sched_rp, monthly_rp = fn(float(new_bal_est), l_rate, remaining_periods - 1, date.fromisoformat(pd))
-                    options['reduce_payment'] = {'new_monthly': monthly_rp, 'new_term': remaining_periods - 1, 'description': 'Уменьшить ежемесячный платёж, срок останется прежним'}
-                    best_term = remaining_periods - 1
-                    for t in range(1, remaining_periods):
-                        _, m = fn(float(new_bal_est), l_rate, t, date.fromisoformat(pd))
-                        if m >= old_monthly * 0.9:
+                    sched_rp, monthly_rp = fn(float(new_bal_est), l_rate, remaining_after, sched_start)
+                    options['reduce_payment'] = {'new_monthly': monthly_rp, 'new_term': remaining_after, 'description': 'Уменьшить ежемесячный платёж, срок останется прежним'}
+                    best_term = remaining_after
+                    for t in range(remaining_after, 0, -1):
+                        _, m = fn(float(new_bal_est), l_rate, t, sched_start)
+                        if m <= old_monthly * 1.1:
                             best_term = t
                             break
-                    sched_rt, monthly_rt = fn(float(new_bal_est), l_rate, max(best_term, 1), date.fromisoformat(pd))
+                    if best_term >= remaining_after:
+                        best_term = max(remaining_after - 1, 1)
+                    sched_rt, monthly_rt = fn(float(new_bal_est), l_rate, max(best_term, 1), sched_start)
                     options['reduce_term'] = {'new_monthly': monthly_rt, 'new_term': best_term, 'description': 'Сократить срок, платёж останется примерно прежним'}
                 return {
                     'needs_choice': True,
@@ -394,12 +400,16 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 owed_total = sp + si + spn - spa
                 applied = min(amt, owed_total)
                 remaining_pay = applied
-                if remaining_pay >= si:
-                    i_p = si; remaining_pay -= si
+                already_paid_interest = min(spa, si)
+                already_paid_penalty = min(spa - already_paid_interest, spn) if spa > si else Decimal('0')
+                remaining_interest = si - already_paid_interest
+                remaining_penalty = spn - already_paid_penalty
+                if remaining_pay >= remaining_interest:
+                    i_p = remaining_interest; remaining_pay -= remaining_interest
                 else:
                     i_p = remaining_pay; remaining_pay = Decimal('0')
-                if remaining_pay >= spn:
-                    pnp = spn; remaining_pay -= spn
+                if remaining_pay >= remaining_penalty:
+                    pnp = remaining_penalty; remaining_pay -= remaining_penalty
                 else:
                     pnp = remaining_pay; remaining_pay = Decimal('0')
                 pp = remaining_pay
@@ -431,18 +441,21 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')" % lid)
                 remaining_periods = cur.fetchone()[0]
                 if remaining_periods > 0:
+                    sched_start = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
                     cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')" % lid)
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
                     if overpay_strategy == 'reduce_term':
                         best_term = remaining_periods
-                        for t in range(1, remaining_periods + 1):
-                            _, m = fn(float(nb), l_rate, t, date.fromisoformat(pd))
-                            if m >= old_monthly * 0.9:
+                        for t in range(remaining_periods, 0, -1):
+                            _, m = fn(float(nb), l_rate, t, sched_start)
+                            if m <= old_monthly * 1.1:
                                 best_term = t
                                 break
-                        new_sched, new_monthly = fn(float(nb), l_rate, max(best_term, 1), date.fromisoformat(pd))
+                        if best_term >= remaining_periods:
+                            best_term = max(remaining_periods - 1, 1)
+                        new_sched, new_monthly = fn(float(nb), l_rate, max(best_term, 1), sched_start)
                     else:
-                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_periods, date.fromisoformat(pd))
+                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_periods, sched_start)
                     paid_count = 0
                     cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status='paid'" % lid)
                     paid_count = cur.fetchone()[0]
