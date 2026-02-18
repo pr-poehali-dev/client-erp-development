@@ -743,12 +743,21 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
     elif method == 'POST':
         action = body.get('action', 'create')
         if action == 'create':
-            cn, mid = body['contract_no'], int(body['member_id'])
+            cn = body.get('contract_no', '').strip()
+            mid = int(body['member_id'])
             a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
             pt = body.get('payout_type', 'monthly')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
             mbp = float(body.get('min_balance_pct', 0))
             org_id = body.get('org_id')
+            if not cn:
+                cur.execute("SELECT MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)) FROM savings WHERE contract_no ~ '^[0-9]+'")
+                max_num = cur.fetchone()[0] or 0
+                cn = '%s-%s' % (max_num + 1, sd.strftime('%d%m%Y'))
+            else:
+                cur.execute("SELECT id FROM savings WHERE contract_no='%s'" % esc(cn))
+                if cur.fetchone():
+                    return {'statusCode': 400, 'headers': cors, 'body': json.dumps({'error': 'Договор с номером %s уже существует' % cn})}
             schedule = calc_savings_schedule(a, r, t, sd, pt)
             ed = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(sd, t - 1))
             cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s,%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp, org_id if org_id else 'NULL'))
@@ -758,7 +767,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'opening','Открытие договора. Сумма: %s руб., ставка: %s%%, срок: %s мес.')" % (sid, sd.isoformat(), a, fmt_money(a), r, t))
             audit_log(cur, staff, 'create', 'saving', sid, cn, 'Сумма: %s, ставка: %s%%, срок: %s мес., несниж.остаток: %s%%' % (a, r, t, mbp), ip)
             conn.commit()
-            return {'id': sid, 'schedule': schedule}
+            return {'id': sid, 'contract_no': cn, 'schedule': schedule}
 
         elif action == 'transaction':
             sid = int(body['saving_id'])
