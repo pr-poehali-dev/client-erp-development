@@ -327,6 +327,22 @@ const Loans = () => {
     }
   };
 
+  const handleFixSchedule = async () => {
+    if (!detail || !confirm(`Исправить график по договору ${detail.contract_no}? Будут удалены дубли и пересчитаны статусы.`)) return;
+    setSaving(true);
+    try {
+      const res = await api.loans.fixSchedule(detail.id);
+      toast({ title: "График исправлен", description: `Удалено дублей: ${res.removed_duplicates}, баланс: ${res.new_balance.toLocaleString("ru")} ₽` });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Icon name="Loader2" size={32} className="animate-spin text-primary" /></div>;
 
   const totalPortfolio = loans.filter(l => l.status === "active").reduce((s, l) => s + l.balance, 0);
@@ -542,6 +558,12 @@ const Loans = () => {
                       <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={handleDeleteAllPayments} disabled={saving}>
                         <div className="flex items-center gap-2"><Icon name="Eraser" size={16} /><span className="font-medium text-sm">Удалить все платежи</span></div>
                         <span className="text-xs text-muted-foreground">Сбросить историю платежей и восстановить остаток</span>
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1 border-blue-300 text-blue-700 hover:bg-blue-50" onClick={handleFixSchedule} disabled={saving}>
+                        <div className="flex items-center gap-2"><Icon name="Wrench" size={16} /><span className="font-medium text-sm">Исправить график</span></div>
+                        <span className="text-xs text-muted-foreground">Удалить дубли и пересчитать статусы платежей</span>
                       </Button>
                     )}
                     {isAdmin && (

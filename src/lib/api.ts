@@ -61,6 +61,8 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
     deletePayment: (paymentId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_payment", payment_id: paymentId }),
+    fixSchedule: (loanId: number) =>
+      request<{ success: boolean; removed_duplicates: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "fix_schedule", loan_id: loanId }),
   },
 
   savings: {
