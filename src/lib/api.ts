@@ -88,6 +88,8 @@ export const api = {
       request<{ success: boolean; days_accrued: number; total_amount: number; date_from: string; date_to: string }>("POST", undefined, { entity: "savings", action: "backfill_accrue", ...data }),
     recalcSchedule: (savingId: number) =>
       request<{ success: boolean; new_end_date: string }>("POST", undefined, { entity: "savings", action: "recalc_schedule", saving_id: savingId }),
+    changeRate: (data: { saving_id: number; new_rate: number; effective_date?: string; reason?: string }) =>
+      request<{ success: boolean; old_rate: number; new_rate: number }>("POST", undefined, { entity: "savings", action: "change_rate", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>
@@ -371,6 +373,7 @@ export interface SavingsScheduleItem {
   interest_amount: number;
   cumulative_interest: number;
   balance_after: number;
+  rate?: number;
   status?: string;
   paid_date?: string;
   paid_amount?: number;
@@ -385,10 +388,20 @@ export interface DailyAccrual {
   created_at: string;
 }
 
+export interface RateChange {
+  id: number;
+  effective_date: string;
+  old_rate: number;
+  new_rate: number;
+  reason: string;
+  created_at: string;
+}
+
 export interface SavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
   transactions: SavingTransaction[];
   daily_accruals: DailyAccrual[];
+  rate_changes: RateChange[];
   total_daily_accrued: number;
   max_payout: number;
   accrual_first_date: string | null;

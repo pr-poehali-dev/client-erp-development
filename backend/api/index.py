@@ -597,8 +597,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
-def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions):
-    r = Decimal(str(rate))
+def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes=None):
+    base_rate = Decimal(str(rate))
+    rc_list = []
+    if rate_changes:
+        for rc in rate_changes:
+            rc_date = date.fromisoformat(str(rc[0])) if not isinstance(rc[0], date) else rc[0]
+            rc_list.append((rc_date, Decimal(str(rc[1]))))
+        rc_list.sort(key=lambda x: x[0])
     schedule = []
     cumulative = Decimal('0')
     bal_changes = []
@@ -613,6 +619,13 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
             bal_changes.append((tx_date, -tx_amt))
     bal_changes.sort(key=lambda x: x[0])
 
+    def get_rate_on_date(d):
+        r = base_rate
+        for rc_d, rc_r in rc_list:
+            if rc_d <= d:
+                r = rc_r
+        return r
+
     for i in range(1, term + 1):
         period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
         period_end = last_day_of_month(add_months(start_date, i - 1))
@@ -621,34 +634,41 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
             if bd <= period_start:
                 running_bal += ba
         interest = Decimal('0')
-        sub_starts = [period_start]
+        split_dates = set()
+        split_dates.add(period_start)
         for bd, ba in bal_changes:
             if period_start < bd <= period_end:
-                if bd not in sub_starts:
-                    sub_starts.append(bd)
-        sub_starts.sort()
+                split_dates.add(bd)
+        for rc_d, _ in rc_list:
+            if period_start < rc_d <= period_end:
+                split_dates.add(rc_d)
+        split_dates = sorted(split_dates)
         current_bal = running_bal
-        for j, ss in enumerate(sub_starts):
-            se = sub_starts[j + 1] if j + 1 < len(sub_starts) else period_end
+        for j, ss in enumerate(split_dates):
+            se = split_dates[j + 1] if j + 1 < len(split_dates) else period_end
             days = (se - ss).days
-            if j == len(sub_starts) - 1:
+            if j == len(split_dates) - 1:
                 days = (period_end - ss).days
+            r = get_rate_on_date(ss)
             if days > 0 and current_bal > 0:
                 day_interest = (current_bal * r / Decimal('100') * Decimal(str(days)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 interest += day_interest
-            for bd, ba in bal_changes:
-                if bd == (sub_starts[j + 1] if j + 1 < len(sub_starts) else None):
-                    current_bal += ba
+            if j + 1 < len(split_dates):
+                for bd, ba in bal_changes:
+                    if bd == split_dates[j + 1]:
+                        current_bal += ba
         cumulative += interest
         final_bal = Decimal('0')
         for bd, ba in bal_changes:
             if bd <= period_end:
                 final_bal += ba
+        current_rate = float(get_rate_on_date(period_end))
         balance_after = float(final_bal + cumulative) if payout_type == 'end_of_term' else float(final_bal)
         schedule.append({
             'period_no': i, 'period_start': period_start.isoformat(),
             'period_end': period_end.isoformat(), 'interest_amount': float(interest),
             'cumulative_interest': float(cumulative), 'balance_after': balance_after,
+            'rate': current_rate,
         })
     return schedule
 
@@ -668,7 +688,9 @@ def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_typ
             initial_amount += tx_amt
     if initial_amount < 0:
         initial_amount = 0
-    schedule = calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions)
+    cur.execute("SELECT effective_date, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
+    rate_changes = cur.fetchall()
+    schedule = calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes)
     today = date.today().isoformat()
     for item in schedule:
         cur.execute("SELECT id FROM savings_schedule WHERE saving_id=%s AND period_no=%s AND status='paid'" % (sid, item['period_no']))
@@ -713,6 +735,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % params['id'])
             s['transactions'] = query_rows(cur, "SELECT * FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date" % params['id'])
             s['daily_accruals'] = query_rows(cur, "SELECT id, accrual_date, balance, rate, daily_amount, created_at FROM savings_daily_accruals WHERE saving_id=%s ORDER BY accrual_date" % params['id'])
+            s['rate_changes'] = query_rows(cur, "SELECT id, effective_date, old_rate, new_rate, reason, created_at FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % params['id'])
             cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % params['id'])
             s['total_daily_accrued'] = float(cur.fetchone()[0])
             s['max_payout'] = float(get_accrued_interest_end_of_prev_month(cur, int(params['id'])))
@@ -859,6 +882,9 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s_bal_current = Decimal(str(sv[1]))
             s_rate = Decimal(str(sv[2]))
             s_start = str(sv[3])
+            cur.execute("SELECT effective_date, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
+            rate_changes_rows = cur.fetchall()
+            rate_changes_list = [(date.fromisoformat(str(r[0])), Decimal(str(r[1]))) for r in rate_changes_rows]
 
             s_start_date = date.fromisoformat(s_start)
             d = date.fromisoformat(date_from)
@@ -901,9 +927,13 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             while d <= d_to:
                 ds = d.isoformat()
                 if running_bal > 0 and ds not in existing:
-                    daily_amount = (running_bal * s_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    effective_rate = s_rate
+                    for rc_d, rc_r in rate_changes_list:
+                        if rc_d <= d:
+                            effective_rate = rc_r
+                    daily_amount = (running_bal * effective_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                     if daily_amount > 0:
-                        cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (sid, ds, float(running_bal), float(s_rate), float(daily_amount)))
+                        cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (sid, ds, float(running_bal), float(effective_rate), float(daily_amount)))
                         cur.execute("UPDATE savings SET accrued_interest=accrued_interest+%s, updated_at=NOW() WHERE id=%s" % (float(daily_amount), sid))
                         count += 1
                         total += daily_amount
@@ -981,6 +1011,28 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'schedule': schedule, 'new_end_date': new_end.isoformat()}
 
+        elif action == 'change_rate':
+            sid = int(body['saving_id'])
+            new_rate = float(body['new_rate'])
+            effective_date = body.get('effective_date', date.today().isoformat())
+            reason = body.get('reason', '')
+            cur.execute("SELECT rate, amount, term_months, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден или не активен'}
+            old_rate = float(sv[0])
+            if new_rate == old_rate:
+                return {'error': 'Новая ставка совпадает с текущей'}
+            cur.execute("INSERT INTO savings_rate_changes (saving_id, effective_date, old_rate, new_rate, reason, created_by) VALUES (%s, '%s', %s, %s, '%s', %s)" % (sid, effective_date, old_rate, new_rate, esc(reason), staff))
+            cur.execute("UPDATE savings SET rate=%s, updated_at=NOW() WHERE id=%s" % (new_rate, sid))
+            s_amount, s_term = float(sv[1]), int(sv[2])
+            s_start, s_pt = date.fromisoformat(str(sv[3])), sv[4]
+            schedule = recalc_savings_schedule(cur, sid, s_amount, new_rate, s_term, s_start, s_pt)
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'rate_change','Изменение ставки: %s%% → %s%% с %s. %s')" % (sid, effective_date, old_rate, new_rate, fmt_date(effective_date), esc(reason)))
+            audit_log(cur, staff, 'change_rate', 'saving', sid, '', 'Ставка: %s%% → %s%% с %s' % (old_rate, new_rate, effective_date), ip)
+            conn.commit()
+            return {'success': True, 'old_rate': old_rate, 'new_rate': new_rate, 'schedule': schedule}
+
         elif action == 'auto_accrue':
             sid = int(body['saving_id'])
             today = date.today()
@@ -1051,6 +1103,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 return {'error': 'Договор не найден'}
             cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s" % sid)
             cur.execute("DELETE FROM savings_schedule WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings_rate_changes WHERE saving_id=%s" % sid)
             cur.execute("DELETE FROM savings WHERE id=%s" % sid)
             audit_log(cur, staff, 'delete_contract', 'saving', sid, sr[0], '', ip)
             conn.commit()
@@ -1063,6 +1116,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if not sr:
                 return {'error': 'Договор не найден'}
             cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings_rate_changes WHERE saving_id=%s" % sid)
             cur.execute("UPDATE savings_schedule SET status='pending', paid_date=NULL, paid_amount=0 WHERE saving_id=%s" % sid)
             orig = float(sr[0])
             cur.execute("UPDATE savings SET current_balance=%s, accrued_interest=0, paid_interest=0, status='active', updated_at=NOW() WHERE id=%s" % (orig, sid))

@@ -17,7 +17,7 @@ import api, { Saving, SavingDetail, SavingTransaction, DailyAccrual, Member, Sav
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
-const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие" };
+const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие" };
 
 const columns: Column<Saving>[] = [
   { key: "contract_no", label: "Договор", className: "font-medium" },
@@ -68,6 +68,8 @@ const Savings = () => {
   const [txFilterState, setTxFilterState] = useState<"all" | "transactions" | "accruals">("all");
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
+  const [showRateChange, setShowRateChange] = useState(false);
+  const [rateChangeForm, setRateChangeForm] = useState({ new_rate: "", effective_date: new Date().toISOString().slice(0, 10), reason: "" });
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" });
 
@@ -197,6 +199,24 @@ const Savings = () => {
       const res = await api.savings.modifyTerm({ saving_id: detail.id, new_term: Number(modifyTermForm.new_term) });
       toast({ title: "Срок изменён", description: `Новый срок: ${res.new_term} мес., окончание: ${fmtDate(res.new_end_date)}` });
       setShowModifyTerm(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRateChange = async () => {
+    if (!detail || !rateChangeForm.new_rate) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.changeRate({
+        saving_id: detail.id, new_rate: Number(rateChangeForm.new_rate),
+        effective_date: rateChangeForm.effective_date, reason: rateChangeForm.reason,
+      });
+      toast({ title: "Ставка изменена", description: `${res.old_rate}% → ${res.new_rate}%` });
+      setShowRateChange(false);
       await refreshDetail();
     } catch (e) {
       toast({ title: "Ошибка", description: String(e), variant: "destructive" });
@@ -412,7 +432,7 @@ const Savings = () => {
               <div className="grid grid-cols-5 gap-4">
                 <div><div className="text-xs text-muted-foreground">Пайщик</div><div className="text-sm font-medium">{detail.member_name}</div></div>
                 <div><div className="text-xs text-muted-foreground">Сумма</div><div className="text-sm font-medium">{fmt(detail.amount)}</div></div>
-                <div><div className="text-xs text-muted-foreground">Ставка</div><div className="text-sm font-medium">{detail.rate}%</div></div>
+                <div><div className="text-xs text-muted-foreground">Ставка</div><div className="text-sm font-medium">{detail.rate}%{detail.rate_changes?.length > 0 && <span className="text-xs text-muted-foreground ml-1">(изм. {detail.rate_changes.length})</span>}</div></div>
                 <div><div className="text-xs text-muted-foreground">Выплата %</div><div className="text-sm font-medium">{detail.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div></div>
                 <div><div className="text-xs text-muted-foreground">Баланс</div><div className="text-sm font-bold text-primary">{fmt(detail.current_balance)}</div></div>
               </div>
@@ -445,6 +465,7 @@ const Savings = () => {
                       <table className="w-full text-sm">
                         <thead><tr className="border-b text-xs text-muted-foreground">
                           <th className="text-left py-2 px-2">N</th><th className="text-left py-2 px-2">Период</th>
+                          {detail.rate_changes?.length > 0 && <th className="text-right py-2 px-2">Ставка</th>}
                           <th className="text-right py-2 px-2">Проценты (план)</th><th className="text-right py-2 px-2">Накоплено</th>
                           <th className="text-right py-2 px-2">Баланс</th>
                         </tr></thead>
@@ -452,6 +473,7 @@ const Savings = () => {
                           <tr key={r.period_no} className="border-b last:border-0 hover:bg-muted/30">
                             <td className="py-2 px-2">{r.period_no}</td>
                             <td className="py-2 px-2">{fmtDate(r.period_start)} — {fmtDate(r.period_end)}</td>
+                            {detail.rate_changes?.length > 0 && <td className="py-2 px-2 text-right text-xs">{r.rate ? `${r.rate}%` : ""}</td>}
                             <td className="py-2 px-2 text-right">{fmt(r.interest_amount)}</td>
                             <td className="py-2 px-2 text-right">{fmt(r.cumulative_interest)}</td>
                             <td className="py-2 px-2 text-right font-medium">{fmt(r.balance_after)}</td>
@@ -619,6 +641,10 @@ const Savings = () => {
                     }}>
                       <div className="flex items-center gap-2"><Icon name="RefreshCw" size={16} /><span className="font-medium text-sm">Пересчитать график</span></div>
                       <span className="text-xs text-muted-foreground">Пересчитать даты и суммы графика</span>
+                    </Button>
+                    <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => { setRateChangeForm({ new_rate: "", effective_date: new Date().toISOString().slice(0, 10), reason: "" }); setShowRateChange(true); }}>
+                      <div className="flex items-center gap-2"><Icon name="TrendingUp" size={16} /><span className="font-medium text-sm">Изменить ставку</span></div>
+                      <span className="text-xs text-muted-foreground">Текущая: {detail.rate}%. {detail.rate_changes?.length ? `Изменений: ${detail.rate_changes.length}` : "Изменений не было"}</span>
                     </Button>
                     <Button variant="outline" className="h-auto p-4 flex flex-col items-start gap-1" disabled={detail.status !== "active"} onClick={() => setShowEarlyClose(true)}>
                       <div className="flex items-center gap-2"><Icon name="XCircle" size={16} /><span className="font-medium text-sm">Досрочное закрытие</span></div>
@@ -846,6 +872,47 @@ const Savings = () => {
               <Button onClick={handleBackfillAccrue} disabled={saving} className="gap-2">
                 {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Calculator" size={16} />}
                 Начислить
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rate change dialog */}
+      <Dialog open={showRateChange} onOpenChange={setShowRateChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Изменение ставки</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            {detail && (
+              <>
+                <Card className="p-3 bg-muted/50 space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Текущая ставка:</span>
+                    <span className="font-semibold">{detail.rate}% годовых</span>
+                  </div>
+                </Card>
+                {detail.rate_changes && detail.rate_changes.length > 0 && (
+                  <Card className="p-3 bg-blue-50/50 space-y-1">
+                    <div className="text-xs font-medium text-blue-700 mb-1">История изменений:</div>
+                    {detail.rate_changes.map((rc: { id: number; effective_date: string; old_rate: number; new_rate: number; reason: string }) => (
+                      <div key={rc.id} className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">{fmtDate(rc.effective_date)}</span>
+                        <span>{rc.old_rate}% → {rc.new_rate}%{rc.reason ? ` (${rc.reason})` : ""}</span>
+                      </div>
+                    ))}
+                  </Card>
+                )}
+              </>
+            )}
+            <div className="space-y-1.5"><Label className="text-xs">Дата вступления в силу</Label><Input type="date" value={rateChangeForm.effective_date} onChange={e => setRateChangeForm(p => ({ ...p, effective_date: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Новая ставка, % годовых</Label><Input type="number" step="0.01" value={rateChangeForm.new_rate} onChange={e => setRateChangeForm(p => ({ ...p, new_rate: e.target.value }))} placeholder={detail ? String(detail.rate) : ""} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Причина (необязательно)</Label><Input value={rateChangeForm.reason} onChange={e => setRateChangeForm(p => ({ ...p, reason: e.target.value }))} placeholder="Например: решение правления" /></div>
+            <p className="text-xs text-muted-foreground">Плановый график и начисление процентов будут пересчитаны с учётом новой ставки с указанной даты</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowRateChange(false)}>Отмена</Button>
+              <Button onClick={handleRateChange} disabled={saving || !rateChangeForm.new_rate} className="gap-2">
+                {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="TrendingUp" size={16} />}
+                Применить
               </Button>
             </div>
           </div>
