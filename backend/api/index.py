@@ -2342,6 +2342,34 @@ def handle_dashboard(cur, params=None):
         })
     stats['overdue_loan_list'] = overdue_loans
 
+    expiring_savings = []
+    cur.execute("""
+        SELECT s.id, s.contract_no, m.id as member_id,
+            COALESCE(m.last_name,'') || ' ' || COALESCE(m.first_name,'') || ' ' || COALESCE(m.middle_name,'') as member_name,
+            s.current_balance, s.accrued_interest, s.paid_interest, s.rate, s.end_date,
+            s.org_id, COALESCE(o.short_name, o.name, '') as org_name
+        FROM savings s
+        JOIN members m ON m.id = s.member_id
+        LEFT JOIN organizations o ON o.id = s.org_id
+        WHERE s.status = 'active'
+          AND s.end_date <= CURRENT_DATE + INTERVAL '30 days'
+          AND s.end_date >= CURRENT_DATE%s
+        ORDER BY s.end_date
+    """ % org_filter_savings)
+    total_refund = 0
+    for r in cur.fetchall():
+        refund = float(r[4]) + float(r[5]) - float(r[6])
+        total_refund += refund
+        expiring_savings.append({
+            'saving_id': r[0], 'contract_no': r[1], 'member_id': r[2], 'member_name': r[3].strip(),
+            'current_balance': float(r[4]), 'accrued_interest': float(r[5]),
+            'paid_interest': float(r[6]), 'rate': float(r[7]), 'end_date': str(r[8]),
+            'org_id': r[9], 'org_name': r[10],
+            'refund_amount': round(refund, 2)
+        })
+    stats['expiring_savings'] = expiring_savings
+    stats['expiring_savings_total'] = round(total_refund, 2)
+
     return stats
 
 def hash_password(pw):

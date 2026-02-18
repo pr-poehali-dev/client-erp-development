@@ -4,7 +4,7 @@ import StatCard from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Icon from "@/components/ui/icon";
-import api, { DashboardStats, OverdueLoanItem } from "@/lib/api";
+import api, { DashboardStats, OverdueLoanItem, ExpiringSavingItem } from "@/lib/api";
 
 const formatMoney = (val: number) => {
   if (val >= 1000000) return (val / 1000000).toFixed(1) + " млн ₽";
@@ -47,6 +47,8 @@ const Dashboard = () => {
 
   const orgs = stats?.organizations || [];
   const overdueList = stats?.overdue_loan_list || [];
+  const expiringList = stats?.expiring_savings || [];
+  const expiringTotal = stats?.expiring_savings_total || 0;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -209,6 +211,73 @@ const Dashboard = () => {
                 </div>
               </Card>
             ))}
+          </div>
+        </div>
+      )}
+
+      {expiringList.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Icon name="Clock" size={18} className="text-amber-600" />
+              <h2 className="text-lg font-semibold">Истекающие сбережения (30 дней)</h2>
+              <Badge className="ml-1 bg-amber-100 text-amber-700 hover:bg-amber-100">{expiringList.length}</Badge>
+            </div>
+            <div className="text-sm font-semibold text-amber-700">
+              К возврату: {formatMoney(expiringTotal)}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {expiringList.map((item: ExpiringSavingItem) => {
+              const daysLeft = Math.ceil((new Date(item.end_date).getTime() - Date.now()) / 86400000);
+              return (
+                <Card
+                  key={item.saving_id}
+                  className="p-4 border-amber-200 bg-amber-50/50 hover:shadow-md transition-shadow cursor-pointer"
+                  onClick={() => navigate("/savings")}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <div className="font-semibold text-sm">{item.member_name}</div>
+                      <div className="text-xs text-muted-foreground">Договор {item.contract_no}</div>
+                    </div>
+                    <Badge className="text-xs bg-amber-100 text-amber-700 hover:bg-amber-100">
+                      {daysLeft <= 0 ? "сегодня" : `${daysLeft} дн.`}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 mt-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Тело вклада</span>
+                      <span className="font-medium">{formatMoney(item.current_balance)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Начислено %</span>
+                      <span className="font-medium">{formatMoney(item.accrued_interest)}</span>
+                    </div>
+                    {item.paid_interest > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Выплачено %</span>
+                        <span className="text-muted-foreground">{formatMoney(item.paid_interest)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm border-t pt-1.5 mt-1.5">
+                      <span className="text-amber-700 font-medium">К возврату</span>
+                      <span className="font-semibold text-amber-700">{formatMoney(item.refund_amount)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Дата окончания</span>
+                      <span className="text-muted-foreground">{formatDate(item.end_date)}</span>
+                    </div>
+                    {item.org_name && !selectedOrg && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Организация</span>
+                        <span className="text-muted-foreground">{item.org_name}</span>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}

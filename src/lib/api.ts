@@ -207,6 +207,21 @@ export interface DashboardOrg {
   short_name: string;
 }
 
+export interface ExpiringSavingItem {
+  saving_id: number;
+  contract_no: string;
+  member_id: number;
+  member_name: string;
+  current_balance: number;
+  accrued_interest: number;
+  paid_interest: number;
+  rate: number;
+  end_date: string;
+  org_id: number | null;
+  org_name: string;
+  refund_amount: number;
+}
+
 export interface DashboardStats {
   total_members: number;
   active_loans: number;
@@ -216,6 +231,8 @@ export interface DashboardStats {
   total_shares: number;
   organizations: DashboardOrg[];
   overdue_loan_list: OverdueLoanItem[];
+  expiring_savings: ExpiringSavingItem[];
+  expiring_savings_total: number;
 }
 
 export interface Member {
