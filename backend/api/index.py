@@ -370,7 +370,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     sched_rp, monthly_rp = fn(float(new_bal_est), l_rate, remaining_after, sched_start)
                     options['reduce_payment'] = {'new_monthly': monthly_rp, 'new_term': remaining_after, 'description': 'Уменьшить ежемесячный платёж, срок останется прежним'}
                     best_term = remaining_after
-                    for t in range(remaining_after, 0, -1):
+                    for t in range(1, remaining_after + 1):
                         _, m = fn(float(new_bal_est), l_rate, t, sched_start)
                         if m <= old_monthly * 1.1:
                             best_term = t
@@ -446,7 +446,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
                     if overpay_strategy == 'reduce_term':
                         best_term = remaining_periods
-                        for t in range(remaining_periods, 0, -1):
+                        for t in range(1, remaining_periods + 1):
                             _, m = fn(float(nb), l_rate, t, sched_start)
                             if m <= old_monthly * 1.1:
                                 best_term = t
@@ -512,12 +512,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 nt = max(remaining_periods, 1)
             else:
                 if old_monthly > 0:
-                    best_term = max(remaining_periods, 1)
+                    best_term = remaining_periods
                     for t in range(1, remaining_periods + 1):
                         _, m = fn(nb, r, t, date.fromisoformat(pd))
-                        if m >= old_monthly * 0.9:
+                        if m <= old_monthly * 1.1:
                             best_term = t
                             break
+                    if best_term >= remaining_periods:
+                        best_term = max(remaining_periods - 1, 1)
                     nt = max(best_term, 1)
                 else:
                     nt = max(remaining_periods, 1)
