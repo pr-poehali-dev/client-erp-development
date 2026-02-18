@@ -2952,7 +2952,19 @@ def handler(event, context):
         return {'statusCode': code, 'headers': headers, 'body': json.dumps(result)}
     except Exception as e:
         conn.rollback()
-        return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': str(e)})}
+        err = str(e)
+        msg = err
+        if 'unique' in err.lower() and 'constraint' in err.lower():
+            msg = 'Запись с такими данными уже существует'
+        elif 'check' in err.lower() and 'constraint' in err.lower():
+            msg = 'Некорректные данные. Проверьте заполнение полей'
+        elif 'foreign key' in err.lower() or 'not-null' in err.lower():
+            msg = 'Невозможно выполнить: связанные данные не найдены или не заполнены обязательные поля'
+        elif 'numeric' in err.lower() and 'overflow' in err.lower():
+            msg = 'Слишком большое число. Проверьте суммы и ставки'
+        elif 'division by zero' in err.lower():
+            msg = 'Ошибка вычисления: деление на ноль. Проверьте параметры'
+        return {'statusCode': 500, 'headers': headers, 'body': json.dumps({'error': msg})}
     finally:
         cur.close()
         conn.close()
