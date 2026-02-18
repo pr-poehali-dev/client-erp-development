@@ -42,6 +42,15 @@ def query_one(cur, sql):
     row = cur.fetchone()
     return {cols[i]: serialize(row[i]) for i in range(len(cols))}
 
+def calc_payment_dates(start_date, term):
+    dates = []
+    for i in range(1, term + 1):
+        if i == term:
+            dates.append(add_months(start_date, term))
+        else:
+            dates.append(last_day_of_month(add_months(start_date, i)))
+    return dates
+
 def calc_annuity_schedule(amount, rate, term, start_date):
     monthly_rate = Decimal(str(rate)) / Decimal('100') / Decimal('12')
     amt = Decimal(str(amount))
@@ -52,10 +61,12 @@ def calc_annuity_schedule(amount, rate, term, start_date):
     annuity = annuity.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     schedule = []
     balance = amt
+    pay_dates = calc_payment_dates(start_date, term)
     for i in range(1, term + 1):
-        payment_date = last_day_of_month(add_months(start_date, i))
-        days_in_month = calendar.monthrange(payment_date.year, payment_date.month)[1]
-        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        payment_date = pay_dates[i - 1]
+        prev_date = pay_dates[i - 2] if i > 1 else start_date
+        days_in_period = (payment_date - prev_date).days
+        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_period)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if i == term:
             principal = balance
             payment = principal + interest
@@ -78,10 +89,12 @@ def calc_end_of_term_schedule(amount, rate, term, start_date):
     amt = Decimal(str(amount))
     schedule = []
     balance = amt
+    pay_dates = calc_payment_dates(start_date, term)
     for i in range(1, term + 1):
-        payment_date = last_day_of_month(add_months(start_date, i))
-        days_in_month = calendar.monthrange(payment_date.year, payment_date.month)[1]
-        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_month)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        payment_date = pay_dates[i - 1]
+        prev_date = pay_dates[i - 2] if i > 1 else start_date
+        days_in_period = (payment_date - prev_date).days
+        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_period)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if i == term:
             principal = balance
             payment = principal + interest
@@ -300,7 +313,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
             st = body.get('schedule_type', 'annuity')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
-            ed = last_day_of_month(add_months(sd, t))
+            ed = add_months(sd, t)
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
             schedule, monthly = fn(a, r, t, sd)
             org_id = body.get('org_id')
