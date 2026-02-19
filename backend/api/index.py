@@ -64,9 +64,7 @@ def calc_annuity_schedule(amount, rate, term, start_date):
     pay_dates = calc_payment_dates(start_date, term)
     for i in range(1, term + 1):
         payment_date = pay_dates[i - 1]
-        prev_date = pay_dates[i - 2] if i > 1 else start_date
-        days_in_period = (payment_date - prev_date).days
-        interest = (balance * Decimal(str(rate)) / Decimal('100') * Decimal(str(days_in_period)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        interest = (balance * monthly_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if i == term:
             principal = balance
             payment = principal + interest
