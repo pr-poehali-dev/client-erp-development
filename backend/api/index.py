@@ -140,24 +140,29 @@ def refresh_loan_overdue_status(cur, lid):
     row = cur.fetchone()
     if not row or row[0] == 'closed':
         return
+    
     cur.execute("""
         SELECT COUNT(*) FROM loan_schedule
-        WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+        WHERE loan_id=%s AND status = 'pending'
           AND payment_date < CURRENT_DATE
-          AND COALESCE(paid_amount,0) < (principal_amount + interest_amount + COALESCE(penalty_amount,0))
     """ % lid)
     has_overdue = cur.fetchone()[0] > 0
+    
     if has_overdue:
         cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
         cur.execute("""
             UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
-            WHERE loan_id=%s AND status IN ('pending','partial') AND payment_date < CURRENT_DATE
-              AND COALESCE(paid_amount,0) < (principal_amount + interest_amount + COALESCE(penalty_amount,0))
+            WHERE loan_id=%s AND status = 'pending' AND payment_date < CURRENT_DATE
         """ % lid)
     else:
         cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET overdue_days=0 WHERE loan_id=%s AND status='overdue'" % lid)
         cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
+    
+    cur.execute("""
+        UPDATE loan_schedule SET overdue_days=(CURRENT_DATE - payment_date)
+        WHERE loan_id=%s AND status = 'partial' AND payment_date < CURRENT_DATE
+    """ % lid)
 
 def recalc_loan_schedule_statuses(cur, lid):
     cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending' WHERE loan_id=%s" % lid)
