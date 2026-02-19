@@ -1,5 +1,7 @@
 import funcUrls from "../../backend/func2url.json";
 
+export const toNum = (v: string | number): number => typeof v === "number" ? v : Number(String(v).replace(",", "."));
+
 const API_URL = funcUrls.api;
 
 type Params = Record<string, string | number | undefined>;

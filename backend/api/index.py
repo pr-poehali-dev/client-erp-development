@@ -12,6 +12,16 @@ from io import BytesIO
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
 
+def safe_float(v, field_name='значение'):
+    if v is None:
+        raise ValueError('Не указано: %s' % field_name)
+    return float(str(v).replace(',', '.'))
+
+def safe_int(v, field_name='значение'):
+    if v is None:
+        raise ValueError('Не указано: %s' % field_name)
+    return int(float(str(v).replace(',', '.')))
+
 def last_day_of_month(d):
     return d.replace(day=calendar.monthrange(d.year, d.month)[1])
 
@@ -315,7 +325,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
             return loan
         elif action == 'schedule':
-            a, r, t = float(params['amount']), float(params['rate']), int(params['term'])
+            a, r, t = safe_float(params['amount'], 'сумма'), safe_float(params['rate'], 'ставка'), safe_int(params['term'], 'срок')
             st = params.get('schedule_type', 'annuity')
             sd = date.fromisoformat(params.get('start_date', date.today().isoformat()))
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
@@ -339,7 +349,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
         if action == 'create':
             cn = body['contract_no']
             mid = int(body['member_id'])
-            a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
+            a, r, t = safe_float(body['amount'], 'сумма'), safe_float(body['rate'], 'ставка'), safe_int(body['term_months'], 'срок')
             st = body.get('schedule_type', 'annuity')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
             ed = add_months(sd, t)
@@ -367,7 +377,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
         elif action == 'payment':
             lid = int(body['loan_id'])
             pd = body['payment_date']
-            amt = Decimal(str(body['amount']))
+            amt = Decimal(str(safe_float(body['amount'], 'сумма')))
             overpay_strategy = body.get('overpay_strategy', '')
 
             cur.execute("SELECT balance, rate, schedule_type, term_months, monthly_payment, start_date FROM loans WHERE id = %s" % lid)
@@ -529,7 +539,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'early_repayment':
             lid = int(body['loan_id'])
-            amt = float(body['amount'])
+            amt = safe_float(body['amount'], 'сумма')
             rt = body.get('repayment_type', 'reduce_term')
             pd = body.get('payment_date', date.today().isoformat())
 
@@ -721,8 +731,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT balance, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
             lr = cur.fetchone()
             bal = float(lr[0])
-            r = float(body['new_rate']) if body.get('new_rate') else float(lr[1])
-            t = int(body['new_term']) if body.get('new_term') else int(lr[2])
+            r = safe_float(body['new_rate'], 'ставка') if body.get('new_rate') else float(lr[1])
+            t = safe_int(body['new_term'], 'срок') if body.get('new_term') else int(lr[2])
             st = lr[4]
 
             cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
@@ -889,7 +899,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s['accrual_days_count'] = accrual_info[2] or 0
             return s
         elif action == 'schedule':
-            a, r, t = float(params['amount']), float(params['rate']), int(params['term'])
+            a, r, t = safe_float(params['amount'], 'сумма'), safe_float(params['rate'], 'ставка'), safe_int(params['term'], 'срок')
             pt = params.get('payout_type', 'monthly')
             sd = date.fromisoformat(params.get('start_date', date.today().isoformat()))
             return {'schedule': calc_savings_schedule(a, r, t, sd, pt)}
@@ -911,10 +921,10 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
         if action == 'create':
             cn = body.get('contract_no', '').strip()
             mid = int(body['member_id'])
-            a, r, t = float(body['amount']), float(body['rate']), int(body['term_months'])
+            a, r, t = safe_float(body['amount'], 'сумма'), safe_float(body['rate'], 'ставка'), safe_int(body['term_months'], 'срок')
             pt = body.get('payout_type', 'monthly')
             sd = date.fromisoformat(body.get('start_date', date.today().isoformat()))
-            mbp = float(body.get('min_balance_pct', 0))
+            mbp = safe_float(body.get('min_balance_pct', 0), 'мин. остаток %')
             org_id = body.get('org_id')
             if not cn:
                 cur.execute("SELECT MAX(CAST(SUBSTRING(contract_no FROM '^[0-9]+') AS INTEGER)) FROM savings WHERE contract_no ~ '^[0-9]+'")
@@ -937,7 +947,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'transaction':
             sid = int(body['saving_id'])
-            a = float(body['amount'])
+            a = safe_float(body['amount'], 'сумма')
             tt = body['transaction_type']
             td = body.get('transaction_date', date.today().isoformat())
             ic = body.get('is_cash', False)
@@ -969,7 +979,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if max_payout <= 0:
                 return {'error': 'Нет начисленных процентов к выплате (по данным на конец предыдущего месяца)'}
 
-            interest = Decimal(str(body['amount'])) if body.get('amount') else max_payout
+            interest = Decimal(str(safe_float(body['amount'], 'сумма'))) if body.get('amount') else max_payout
             if interest > max_payout:
                 interest = max_payout
 
@@ -1099,7 +1109,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'partial_withdrawal':
             sid = int(body['saving_id'])
-            a = Decimal(str(body['amount']))
+            a = Decimal(str(safe_float(body['amount'], 'сумма')))
             td = body.get('transaction_date', date.today().isoformat())
             cur.execute("SELECT current_balance, amount, min_balance_pct FROM savings WHERE id=%s AND status='active'" % sid)
             sv = cur.fetchone()
@@ -1125,7 +1135,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'modify_term':
             sid = int(body['saving_id'])
-            new_term = int(body['new_term'])
+            new_term = safe_int(body.get('new_term'), 'срок')
             effective_date = body.get('effective_date', date.today().isoformat())
             cur.execute("SELECT amount, rate, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
             sv = cur.fetchone()
@@ -1176,9 +1186,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'change_rate':
             sid = int(body['saving_id'])
-            if body.get('new_rate') is None:
-                return resp(400, {'error': 'Не указана новая ставка'})
-            new_rate = float(str(body['new_rate']).replace(',', '.'))
+            new_rate = safe_float(body.get('new_rate'), 'ставка')
             effective_date = body.get('effective_date', date.today().isoformat())
             reason = body.get('reason', '')
             cur.execute("SELECT rate, amount, term_months, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
@@ -1334,7 +1342,7 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
         action = body.get('action', 'create')
         if action == 'create':
             mid = int(body['member_id'])
-            a = float(body.get('amount', 0))
+            a = safe_float(body.get('amount', 0), 'сумма')
             org_id = body.get('org_id')
             cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM share_accounts")
             ni = cur.fetchone()[0]
@@ -1348,7 +1356,7 @@ def handle_shares(method, params, body, cur, conn, staff=None, ip=''):
             return {'id': result[0], 'account_no': result[1]}
         elif action == 'transaction':
             aid = int(body['account_id'])
-            a = float(body['amount'])
+            a = safe_float(body['amount'], 'сумма')
             tt = body['transaction_type']
             td = body.get('transaction_date', date.today().isoformat())
             d = body.get('description', '')

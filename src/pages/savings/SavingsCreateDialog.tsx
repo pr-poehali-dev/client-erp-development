@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
-import { Member, SavingsScheduleItem, Organization } from "@/lib/api";
+import { Member, SavingsScheduleItem, Organization, toNum } from "@/lib/api";
 import api from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -50,7 +50,7 @@ const SavingsCreateDialog = (props: SavingsCreateDialogProps) => {
 
   const handleCalc = async () => {
     if (!form.amount || !form.rate || !form.term_months) return;
-    const res = await api.savings.calcSchedule(Number(form.amount), Number(form.rate), Number(form.term_months), form.payout_type, form.start_date);
+    const res = await api.savings.calcSchedule(toNum(form.amount), toNum(form.rate), toNum(form.term_months), form.payout_type, form.start_date);
     setPreview(res.schedule);
   };
 

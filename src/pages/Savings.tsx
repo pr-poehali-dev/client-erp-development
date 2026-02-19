@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Saving, SavingDetail, SavingTransaction, Member, Organization } from "@/lib/api";
+import api, { toNum, Saving, SavingDetail, SavingTransaction, Member, Organization } from "@/lib/api";
 import SavingsCreateDialog from "./savings/SavingsCreateDialog";
 import SavingsDetailDialog from "./savings/SavingsDetailDialog";
 import SavingsActionDialogs from "./savings/SavingsActionDialogs";
@@ -81,9 +81,9 @@ const Savings = () => {
     try {
       await api.savings.create({
         contract_no: form.contract_no, member_id: Number(form.member_id),
-        amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
+        amount: toNum(form.amount), rate: toNum(form.rate), term_months: toNum(form.term_months),
         payout_type: form.payout_type, start_date: form.start_date,
-        min_balance_pct: form.min_balance_pct ? Number(form.min_balance_pct) : 0,
+        min_balance_pct: form.min_balance_pct ? toNum(form.min_balance_pct) : 0,
         org_id: form.org_id ? Number(form.org_id) : undefined,
       });
       toast({ title: "Договор сбережений создан" });
@@ -114,10 +114,10 @@ const Savings = () => {
     setSaving(true);
     try {
       await api.savings.transaction({
-        saving_id: detail.id, amount: Number(depositForm.amount),
+        saving_id: detail.id, amount: toNum(depositForm.amount),
         transaction_type: "deposit", transaction_date: depositForm.date, is_cash: depositForm.is_cash,
       });
-      toast({ title: "Пополнение проведено", description: fmt(Number(depositForm.amount)) });
+      toast({ title: "Пополнение проведено", description: fmt(toNum(depositForm.amount)) });
       setShowDeposit(false);
       await refreshDetail();
     } catch (e) {
@@ -133,7 +133,7 @@ const Savings = () => {
     try {
       const res = await api.savings.interestPayout({
         saving_id: detail.id,
-        amount: interestForm.amount ? Number(interestForm.amount) : undefined,
+        amount: interestForm.amount ? toNum(interestForm.amount) : undefined,
         transaction_date: interestForm.date,
       });
       toast({ title: "Проценты выплачены", description: fmt(res.amount) });
@@ -166,10 +166,10 @@ const Savings = () => {
     setSaving(true);
     try {
       await api.savings.transaction({
-        saving_id: detail.id, amount: Number(withdrawalForm.amount),
+        saving_id: detail.id, amount: toNum(withdrawalForm.amount),
         transaction_type: "partial_withdrawal", transaction_date: withdrawalForm.date,
       });
-      toast({ title: "Изъятие проведено", description: fmt(Number(withdrawalForm.amount)) });
+      toast({ title: "Изъятие проведено", description: fmt(toNum(withdrawalForm.amount)) });
       setShowWithdrawal(false);
       await refreshDetail();
     } catch (e) {
@@ -183,7 +183,7 @@ const Savings = () => {
     if (!detail || !modifyTermForm.new_term) return;
     setSaving(true);
     try {
-      await api.savings.modifyTerm({ saving_id: detail.id, new_term_months: Number(modifyTermForm.new_term), effective_date: modifyTermForm.effective_date });
+      await api.savings.modifyTerm({ saving_id: detail.id, new_term_months: toNum(modifyTermForm.new_term), effective_date: modifyTermForm.effective_date });
       toast({ title: "Срок изменён" });
       setShowModifyTerm(false);
       await refreshDetail();
@@ -216,7 +216,7 @@ const Savings = () => {
     setSaving(true);
     try {
       await api.savings.changeRate({
-        saving_id: detail.id, new_rate: Number(rateChangeForm.new_rate.replace(",", ".")),
+        saving_id: detail.id, new_rate: toNum(rateChangeForm.new_rate),
         effective_date: rateChangeForm.effective_date, reason: rateChangeForm.reason,
       });
       toast({ title: "Ставка изменена" });
@@ -246,7 +246,7 @@ const Savings = () => {
     try {
       await api.savings.updateTransaction({
         transaction_id: editTxForm.transaction_id,
-        amount: Number(editTxForm.amount), transaction_date: editTxForm.transaction_date,
+        amount: toNum(editTxForm.amount), transaction_date: editTxForm.transaction_date,
         description: editTxForm.description,
       });
       toast({ title: "Транзакция изменена" });

@@ -13,7 +13,7 @@ import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { ShareAccount, ShareAccountDetail, ShareTransaction, Member, Organization } from "@/lib/api";
+import api, { toNum, ShareAccount, ShareAccountDetail, ShareTransaction, Member, Organization } from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -67,7 +67,7 @@ const Shares = () => {
   const handleCreate = async () => {
     setSaving(true);
     try {
-      await api.shares.create({ member_id: Number(createForm.member_id), amount: Number(createForm.amount), org_id: createForm.org_id ? Number(createForm.org_id) : undefined });
+      await api.shares.create({ member_id: Number(createForm.member_id), amount: toNum(createForm.amount), org_id: createForm.org_id ? Number(createForm.org_id) : undefined });
       toast({ title: "Паевой счёт открыт" });
       setShowForm(false);
       load();
@@ -82,7 +82,7 @@ const Shares = () => {
     setSaving(true);
     try {
       await api.shares.transaction({
-        account_id: Number(opForm.account_id), amount: Number(opForm.amount),
+        account_id: Number(opForm.account_id), amount: toNum(opForm.amount),
         transaction_type: opForm.type, transaction_date: opForm.date, description: opForm.description,
       });
       toast({ title: opForm.type === "in" ? "Взнос внесён" : "Выплата проведена" });
@@ -127,7 +127,7 @@ const Shares = () => {
     try {
       await api.shares.updateTransaction({
         transaction_id: editTxForm.transaction_id,
-        amount: Number(editTxForm.amount),
+        amount: toNum(editTxForm.amount),
         transaction_date: editTxForm.transaction_date,
         description: editTxForm.description,
       });

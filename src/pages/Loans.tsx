@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization } from "@/lib/api";
+import api, { toNum, Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization } from "@/lib/api";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
@@ -83,7 +83,7 @@ const Loans = () => {
     try {
       await api.loans.create({
         contract_no: form.contract_no, member_id: Number(form.member_id),
-        amount: Number(form.amount), rate: Number(form.rate), term_months: Number(form.term_months),
+        amount: toNum(form.amount), rate: toNum(form.rate), term_months: toNum(form.term_months),
         schedule_type: form.schedule_type, start_date: form.start_date,
         org_id: form.org_id ? Number(form.org_id) : undefined,
       });
@@ -109,7 +109,7 @@ const Loans = () => {
     try {
       const res = await api.loans.payment({
         loan_id: detail.id, payment_date: payForm.date,
-        amount: Number(payForm.amount), overpay_strategy: strategy,
+        amount: toNum(payForm.amount), overpay_strategy: strategy,
       });
       if (res.needs_choice && res.options) {
         setOverpayOptions(res.options);
@@ -146,7 +146,7 @@ const Loans = () => {
 
   const handleEarlyPreview = async () => {
     if (!detail || !earlyForm.amount) return;
-    const newBalance = detail.balance - Number(earlyForm.amount);
+    const newBalance = detail.balance - toNum(earlyForm.amount);
     if (newBalance <= 0) {
       setEarlyPreview(null);
       setEarlyMonthly(0);
@@ -170,7 +170,7 @@ const Loans = () => {
     setSaving(true);
     try {
       await api.loans.earlyRepayment({
-        loan_id: detail.id, amount: Number(earlyForm.amount),
+        loan_id: detail.id, amount: toNum(earlyForm.amount),
         repayment_type: earlyForm.repayment_type, payment_date: earlyForm.date,
       });
       toast({ title: "Досрочное погашение выполнено" });
@@ -188,9 +188,9 @@ const Loans = () => {
 
   const handleModifyPreview = async () => {
     if (!detail || (!modifyForm.new_rate && !modifyForm.new_term)) return;
-    const newRate = modifyForm.new_rate ? Number(modifyForm.new_rate) : detail.rate;
+    const newRate = modifyForm.new_rate ? toNum(modifyForm.new_rate) : detail.rate;
     const remainingPeriods = detail.schedule.filter(s => s.status === "pending").length;
-    const newTerm = modifyForm.new_term ? Number(modifyForm.new_term) : remainingPeriods;
+    const newTerm = modifyForm.new_term ? toNum(modifyForm.new_term) : remainingPeriods;
     const res = await api.loans.calcSchedule(
       detail.balance,
       newRate,
@@ -208,8 +208,8 @@ const Loans = () => {
     try {
       await api.loans.modify({
         loan_id: detail.id,
-        new_rate: modifyForm.new_rate ? Number(modifyForm.new_rate) : undefined,
-        new_term: modifyForm.new_term ? Number(modifyForm.new_term) : undefined,
+        new_rate: modifyForm.new_rate ? toNum(modifyForm.new_rate) : undefined,
+        new_term: modifyForm.new_term ? toNum(modifyForm.new_term) : undefined,
       });
       toast({ title: "Условия изменены" });
       setShowModify(false);
@@ -231,10 +231,10 @@ const Loans = () => {
       await api.loans.updatePayment({
         payment_id: editPayForm.payment_id,
         payment_date: editPayForm.payment_date,
-        amount: Number(editPayForm.amount),
-        principal_part: editPayForm.principal_part ? Number(editPayForm.principal_part) : undefined,
-        interest_part: editPayForm.interest_part ? Number(editPayForm.interest_part) : undefined,
-        penalty_part: editPayForm.penalty_part ? Number(editPayForm.penalty_part) : undefined,
+        amount: toNum(editPayForm.amount),
+        principal_part: editPayForm.principal_part ? toNum(editPayForm.principal_part) : undefined,
+        interest_part: editPayForm.interest_part ? toNum(editPayForm.interest_part) : undefined,
+        penalty_part: editPayForm.penalty_part ? toNum(editPayForm.penalty_part) : undefined,
       });
       toast({ title: "Платёж изменён" });
       setShowEditPayment(false);

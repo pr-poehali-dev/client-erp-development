@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Icon from "@/components/ui/icon";
 import MemberSearch from "@/components/ui/member-search";
-import { Member, ScheduleItem, Organization } from "@/lib/api";
+import { Member, ScheduleItem, Organization, toNum } from "@/lib/api";
 import api from "@/lib/api";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -49,7 +49,7 @@ const LoansCreateDialog = (props: LoansCreateDialogProps) => {
 
   const handleCalc = async () => {
     if (!form.amount || !form.rate || !form.term_months) return;
-    const res = await api.loans.calcSchedule(Number(form.amount), Number(form.rate), Number(form.term_months), form.schedule_type, form.start_date);
+    const res = await api.loans.calcSchedule(toNum(form.amount), toNum(form.rate), toNum(form.term_months), form.schedule_type, form.start_date);
     setPreview(res.schedule);
     setPreviewMonthly(res.monthly_payment);
   };
