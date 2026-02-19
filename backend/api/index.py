@@ -393,6 +393,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 ORDER BY payment_no, id LIMIT 1
             """ % lid)
             first_row = cur.fetchone()
+            
+            cur.execute("""
+                SELECT COALESCE(SUM(principal_amount + interest_amount + penalty_amount - COALESCE(paid_amount, 0)), 0)
+                FROM loan_schedule WHERE loan_id=%s AND status IN ('overdue', 'partial')
+            """ % lid)
+            total_overdue = Decimal(str(cur.fetchone()[0]))
+            
             if first_row:
                 f_sid = first_row[0]
                 f_sp = Decimal(str(first_row[1]))
@@ -401,7 +408,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 f_spa = Decimal(str(first_row[4]))
                 f_pay_date = first_row[5]
                 f_pay_no = first_row[6]
-                current_owed = f_sp + f_si + f_spn - f_spa
+                first_payment_owed = f_sp + f_si + f_spn - f_spa
+                current_owed = max(total_overdue, first_payment_owed)
             else:
                 current_owed = loan_bal
                 f_pay_date = date.fromisoformat(pd)
@@ -409,7 +417,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             overpay_amount = amt - current_owed if amt > current_owed else Decimal('0')
             overpay_threshold = old_monthly * Decimal('0.5')
-            is_significant_overpay = overpay_amount > overpay_threshold and amt < loan_bal
+            is_significant_overpay = overpay_amount > overpay_threshold and amt < loan_bal and total_overdue == 0
 
             if is_significant_overpay and not overpay_strategy:
                 need_i = f_si - min(f_spa, f_si)
@@ -451,26 +459,42 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             remaining_amt = amt
 
             if first_row:
-                already_i = min(f_spa, f_si)
-                already_pn = min(f_spa - f_si, f_spn) if f_spa > f_si else Decimal('0')
-                need_i = f_si - already_i
-                need_pn = f_spn - already_pn
-
-                item_i = min(remaining_amt, need_i)
-                remaining_amt -= item_i
-                item_pn = min(remaining_amt, need_pn)
-                remaining_amt -= item_pn
-                item_pp = remaining_amt
-                remaining_amt = Decimal('0')
-
-                i_p = item_i
-                pnp = item_pn
-                pp = item_pp
-
-                total_item = f_sp + f_si + f_spn
-                new_paid = f_spa + amt
-                ns = 'paid' if new_paid >= total_item else 'partial'
-                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, f_sid))
+                cur.execute("""
+                    SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
+                    FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+                    ORDER BY payment_no, id
+                """ % lid)
+                unpaid_rows = cur.fetchall()
+                
+                for row in unpaid_rows:
+                    if remaining_amt <= 0:
+                        break
+                    sid = row[0]
+                    sp = Decimal(str(row[1]))
+                    si = Decimal(str(row[2]))
+                    spn = Decimal(str(row[3]))
+                    spa = Decimal(str(row[4]))
+                    
+                    already_i = min(spa, si)
+                    already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+                    need_i = si - already_i
+                    need_pn = spn - already_pn
+                    
+                    item_i = min(remaining_amt, need_i)
+                    remaining_amt -= item_i
+                    item_pn = min(remaining_amt, need_pn)
+                    remaining_amt -= item_pn
+                    item_pp = remaining_amt if remaining_amt <= sp else sp
+                    remaining_amt -= item_pp
+                    
+                    i_p += item_i
+                    pnp += item_pn
+                    pp += item_pp
+                    
+                    total_item = sp + si + spn
+                    new_paid = spa + item_i + item_pn + item_pp
+                    ns = 'paid' if new_paid >= total_item else 'partial'
+                    cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
             else:
                 pp = min(amt, loan_bal)
 
