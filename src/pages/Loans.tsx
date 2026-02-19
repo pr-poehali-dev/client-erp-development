@@ -303,6 +303,28 @@ const Loans = () => {
     }
   };
 
+  const handleCheckStatus = async () => {
+    if (!detail) return;
+    try {
+      const res = await fetch(`https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450/loans?action=check_status&loan_number=${detail.contract_no}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('staff_token')}` }
+      });
+      const data = await res.json();
+      console.log('=== ДИАГНОСТИКА СТАТУСОВ ===');
+      console.log('Договор:', data.loan_number);
+      console.log('Всего платежей по графику:', data.schedule.length);
+      console.log('Статистика:', data.stats);
+      console.log('Сумма paid_amount из графика:', data.total_paid_from_schedule, '₽');
+      console.log('Сумма фактических платежей:', data.total_paid_from_payments, '₽');
+      console.log('Последний оплаченный период:', data.last_paid_period);
+      console.log('\nГрафик платежей:', data.schedule);
+      console.log('\nФактические платежи:', data.payments);
+      toast({ title: "Диагностика завершена", description: "Результаты в консоли (F12)" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -327,6 +349,7 @@ const Loans = () => {
 
       <LoansDetailDialog
         open={showDetail}
+        onCheckStatus={handleCheckStatus}
         onOpenChange={setShowDetail}
         detail={detail}
         isAdmin={isAdmin}
