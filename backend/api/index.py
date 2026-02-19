@@ -326,7 +326,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             return loan
         elif action == 'check_status':
             loan_number = params.get('loan_number')
-            cur.execute("SELECT id FROM loans WHERE loan_number = '%s'" % loan_number)
+            if not loan_number:
+                return {'error': 'Не указан номер договора'}
+            cur.execute("SELECT id FROM loans WHERE loan_number = '%s'" % esc(loan_number))
             lr = cur.fetchone()
             if not lr:
                 return {'error': 'Договор не найден'}
