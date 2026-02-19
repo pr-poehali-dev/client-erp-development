@@ -29,6 +29,7 @@ const Admin = () => {
   const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
   const [auditLoading, setAuditLoading] = useState(false);
   const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -49,7 +50,8 @@ const Admin = () => {
   };
 
   const loadOrgs = () => {
-    api.organizations.list().then(setOrgs).catch(() => {});
+    setOrgsLoading(true);
+    api.organizations.list().then(setOrgs).catch(() => {}).finally(() => setOrgsLoading(false));
   };
 
   const handleCreateUser = async (form: { login: string; name: string; role: string; password: string; email: string; phone: string }) => {
@@ -161,6 +163,8 @@ const Admin = () => {
 
         <TabsContent value="organizations">
           <AdminOrganizations
+            orgs={orgs}
+            loading={orgsLoading}
             onLoad={loadOrgs}
             onCreate={handleCreateOrg}
             onUpdate={handleUpdateOrg}

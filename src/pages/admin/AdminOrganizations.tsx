@@ -8,6 +8,8 @@ import Icon from "@/components/ui/icon";
 import { Organization } from "@/lib/api";
 
 interface AdminOrganizationsProps {
+  orgs: Organization[];
+  loading: boolean;
   onLoad: () => void;
   onCreate: (form: Partial<Organization>) => Promise<void>;
   onUpdate: (id: number, form: Partial<Organization>) => Promise<void>;
@@ -16,20 +18,17 @@ interface AdminOrganizationsProps {
 }
 
 const AdminOrganizations = (props: AdminOrganizationsProps) => {
-  const { onLoad, onCreate, onUpdate, onDelete, onUploadLogo } = props;
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [orgsLoading, setOrgsLoading] = useState(false);
+  const { orgs, loading, onLoad, onCreate, onUpdate, onDelete, onUploadLogo } = props;
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [editOrg, setEditOrg] = useState<Organization | null>(null);
   const [orgForm, setOrgForm] = useState<Partial<Organization>>({});
   const [orgSaving, setOrgSaving] = useState(false);
 
   useEffect(() => {
-    loadOrgs();
+    onLoad();
   }, []);
 
   const loadOrgs = () => {
-    setOrgsLoading(true);
     onLoad();
   };
 
@@ -87,7 +86,7 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
   return (
     <>
       <div className="mb-4"><Button onClick={() => openOrgForm()}><Icon name="Building2" size={16} className="mr-2" />Создать организацию</Button></div>
-      {orgsLoading ? (
+      {loading ? (
         <div className="text-center py-8 text-muted-foreground">Загрузка...</div>
       ) : orgs.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">Нет организаций</div>
