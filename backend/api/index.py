@@ -324,6 +324,41 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % params['id'])
             loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % params['id'])
             return loan
+        elif action == 'check_status':
+            loan_number = params.get('loan_number')
+            cur.execute("SELECT id FROM loans WHERE loan_number = '%s'" % loan_number)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            lid = lr[0]
+            
+            cur.execute("SELECT payment_no, payment_date, principal_amount, interest_amount, penalty_amount, COALESCE(paid_amount,0) as paid_amount, status, paid_date FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % lid)
+            schedule = [{'payment_no': r[0], 'payment_date': str(r[1]), 'principal': float(r[2]), 'interest': float(r[3]), 'penalty': float(r[4]), 'paid_amount': float(r[5]), 'status': r[6], 'paid_date': str(r[7]) if r[7] else None} for r in cur.fetchall()]
+            
+            cur.execute("SELECT payment_date, amount, principal_part, interest_part, penalty_part FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % lid)
+            payments = [{'payment_date': str(r[0]), 'amount': float(r[1]), 'principal': float(r[2]), 'interest': float(r[3]), 'penalty': float(r[4])} for r in cur.fetchall()]
+            
+            total_paid_from_schedule = sum(s['paid_amount'] for s in schedule)
+            total_paid_from_payments = sum(p['amount'] for p in payments)
+            
+            last_paid = [s for s in schedule if s['status'] == 'paid']
+            last_paid_period = last_paid[-1]['payment_date'] if last_paid else None
+            
+            return {
+                'loan_id': lid,
+                'loan_number': loan_number,
+                'schedule': schedule,
+                'payments': payments,
+                'total_paid_from_schedule': total_paid_from_schedule,
+                'total_paid_from_payments': total_paid_from_payments,
+                'last_paid_period': last_paid_period,
+                'stats': {
+                    'paid': len([s for s in schedule if s['status'] == 'paid']),
+                    'partial': len([s for s in schedule if s['status'] == 'partial']),
+                    'pending': len([s for s in schedule if s['status'] == 'pending']),
+                    'overdue': len([s for s in schedule if s['status'] == 'overdue'])
+                }
+            }
         elif action == 'schedule':
             a, r, t = safe_float(params['amount'], 'сумма'), safe_float(params['rate'], 'ставка'), safe_int(params['term'], 'срок')
             st = params.get('schedule_type', 'annuity')
