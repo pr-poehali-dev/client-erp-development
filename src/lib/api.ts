@@ -355,7 +355,6 @@ export interface PaymentResult {
   interest_part?: number;
   penalty_part?: number;
   schedule_recalculated?: boolean;
-  auto_recalculated?: boolean;
   new_monthly?: number;
   needs_choice?: boolean;
   overpay_amount?: number;

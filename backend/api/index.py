@@ -152,70 +152,38 @@ def refresh_loan_overdue_status(cur, lid):
         cur.execute("UPDATE loan_schedule SET status='pending' WHERE loan_id=%s AND status='overdue'" % lid)
 
 def recalc_loan_schedule_statuses(cur, lid):
-    cur.execute("SELECT amount, rate, schedule_type, start_date FROM loans WHERE id=%s" % lid)
-    lr = cur.fetchone()
-    if not lr:
-        return
-    loan_amount = Decimal(str(lr[0]))
-    l_rate = float(lr[1])
-    l_stype = lr[2]
-    loan_start = lr[3]
+    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending' WHERE loan_id=%s" % lid)
     cur.execute("SELECT id, payment_date, amount FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
-    cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s" % lid)
-    total_periods = cur.fetchone()[0]
-    cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
-    fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
-    full_sched, _ = fn(float(loan_amount), l_rate, total_periods, loan_start if isinstance(loan_start, date) else date.fromisoformat(str(loan_start)))
-    for item in full_sched:
-        cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after,status,paid_amount) VALUES (%s,%s,'%s',%s,%s,%s,%s,'pending',0)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
-    balance = loan_amount
     for pay in payments:
         pay_date = str(pay[1])
-        pay_amt = Decimal(str(pay[2]))
-        cur.execute("SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date, payment_no FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial') ORDER BY payment_no LIMIT 1" % lid)
-        fr = cur.fetchone()
-        if not fr:
-            break
-        sid = fr[0]
-        si = Decimal(str(fr[2]))
-        spn = Decimal(str(fr[3]))
-        spa = Decimal(str(fr[4]))
-        total_item = Decimal(str(fr[1])) + si + spn
-        left = total_item - spa
-        pay_for_first = min(pay_amt, left)
-        overpay_part = pay_amt - pay_for_first
-        new_paid = spa + pay_for_first
-        ns = 'paid' if new_paid >= total_item else 'partial'
-        cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
-        principal_from_schedule = min(pay_for_first, Decimal(str(fr[1])))
-        principal_from_overpay = overpay_part
-        total_pp = principal_from_schedule + principal_from_overpay
-        balance -= total_pp
-        if balance < 0:
-            balance = Decimal('0')
-        if overpay_part > 0 and balance > 0:
-            cur.execute("SELECT id FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial') ORDER BY payment_no" % lid)
-            remaining_ids = [r[0] for r in cur.fetchall()]
-            if remaining_ids:
-                remaining_count = len(remaining_ids)
-                for rid in remaining_ids:
-                    cur.execute("DELETE FROM loan_schedule WHERE id=%s" % rid)
-                last_paid_date = date.fromisoformat(str(fr[5])) if isinstance(fr[5], str) else fr[5]
-                new_sched, new_monthly = fn(float(balance), l_rate, remaining_count, last_paid_date)
-                cur.execute("SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s" % lid)
-                mnr = cur.fetchone()
-                max_no = mnr[0] if mnr and mnr[0] else 0
-                for item in new_sched:
-                    cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after,status,paid_amount) VALUES (%s,%s,'%s',%s,%s,%s,%s,'pending',0)" % (lid, max_no + item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
-    cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(balance), lid))
-    if balance == 0:
-        cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % lid)
-    else:
-        cur.execute("SELECT payment_amount FROM loan_schedule WHERE loan_id=%s AND status='pending' ORDER BY payment_no LIMIT 1" % lid)
-        mp_row = cur.fetchone()
-        if mp_row:
-            cur.execute("UPDATE loans SET monthly_payment=%s, updated_at=NOW() WHERE id=%s" % (float(mp_row[0]), lid))
+        remaining = Decimal(str(pay[2]))
+        cur.execute("SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial') ORDER BY payment_no, id" % lid)
+        sched_rows = cur.fetchall()
+        for sr in sched_rows:
+            if remaining <= 0:
+                break
+            sid = sr[0]
+            sp = Decimal(str(sr[1]))
+            si = Decimal(str(sr[2]))
+            spn = Decimal(str(sr[3]))
+            spa = Decimal(str(sr[4]))
+            total_item = sp + si + spn
+            left = total_item - spa
+            if left <= 0:
+                continue
+            applied = min(remaining, left)
+            remaining -= applied
+            new_paid = spa + applied
+            ns = 'paid' if new_paid >= total_item else 'partial'
+            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
+        if remaining > 0:
+            cur.execute("SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount FROM loan_schedule WHERE loan_id=%s AND status='paid' ORDER BY payment_no DESC, id DESC LIMIT 1" % lid)
+            last_paid = cur.fetchone()
+            if last_paid:
+                sid = last_paid[0]
+                spa = Decimal(str(last_paid[4]))
+                cur.execute("UPDATE loan_schedule SET paid_amount=%s WHERE id=%s" % (float(spa + remaining), sid))
     refresh_loan_overdue_status(cur, lid)
 
 def esc(val):
@@ -388,52 +356,50 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             cur.execute("SELECT balance, rate, schedule_type, term_months, monthly_payment, start_date FROM loans WHERE id = %s" % lid)
             loan_row = cur.fetchone()
             loan_bal = Decimal(str(loan_row[0]))
-            l_rate = float(loan_row[1])
-            l_stype = loan_row[2]
+            l_rate, l_stype = float(loan_row[1]), loan_row[2]
             old_monthly = Decimal(str(loan_row[4]))
             loan_start = loan_row[5]
 
             cur.execute("""
                 SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date, payment_no
                 FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
-                ORDER BY payment_no, id
+                ORDER BY payment_no, id LIMIT 1
             """ % lid)
-            all_unpaid = cur.fetchall()
-
-            if all_unpaid:
-                fr = all_unpaid[0]
-                f_sp = Decimal(str(fr[1]))
-                f_si = Decimal(str(fr[2]))
-                f_spn = Decimal(str(fr[3]))
-                f_spa = Decimal(str(fr[4]))
-                f_pay_date = fr[5]
+            first_row = cur.fetchone()
+            if first_row:
+                f_sid = first_row[0]
+                f_sp = Decimal(str(first_row[1]))
+                f_si = Decimal(str(first_row[2]))
+                f_spn = Decimal(str(first_row[3]))
+                f_spa = Decimal(str(first_row[4]))
+                f_pay_date = first_row[5]
+                f_pay_no = first_row[6]
                 current_owed = f_sp + f_si + f_spn - f_spa
             else:
                 current_owed = loan_bal
                 f_pay_date = date.fromisoformat(pd)
-                f_si = Decimal('0')
-                f_spn = Decimal('0')
+                f_pay_no = 0
 
             overpay_amount = amt - current_owed if amt > current_owed else Decimal('0')
             overpay_threshold = old_monthly * Decimal('0.5')
-            is_significant = overpay_amount > overpay_threshold and amt < loan_bal
-            has_overpay = overpay_amount > Decimal('0') and amt < loan_bal
+            is_significant_overpay = overpay_amount > overpay_threshold and amt < loan_bal
 
-            if is_significant and not overpay_strategy:
+            if is_significant_overpay and not overpay_strategy:
                 est_principal = amt - f_si - f_spn
                 if est_principal < 0:
                     est_principal = Decimal('0')
                 new_bal_est = loan_bal - est_principal
                 if new_bal_est < 0:
                     new_bal_est = Decimal('0')
-                remaining_periods = len(all_unpaid)
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+                remaining_periods = cur.fetchone()[0]
                 remaining_after = remaining_periods - 1
                 f_pay_date_parsed = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
                 options = {}
                 if remaining_after >= 1 and float(new_bal_est) > 0:
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
                     sched_rp, monthly_rp = fn(float(new_bal_est), l_rate, remaining_after, f_pay_date_parsed)
-                    options['reduce_payment'] = {'new_monthly': monthly_rp, 'new_term': remaining_after, 'description': 'Уменьшить платёж, срок останется прежним'}
+                    options['reduce_payment'] = {'new_monthly': monthly_rp, 'new_term': remaining_after, 'description': 'Уменьшить ежемесячный платёж, срок останется прежним'}
                     best_term = remaining_after
                     for t in range(1, remaining_after + 1):
                         _, m = fn(float(new_bal_est), l_rate, t, f_pay_date_parsed)
@@ -454,38 +420,58 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             pp = i_p = pnp = Decimal('0')
             remaining_amt = amt
+            updated_schedule_ids = []
 
-            if all_unpaid:
-                first_row = all_unpaid[0]
-                sid = first_row[0]
-                sp = Decimal(str(first_row[1]))
-                si = Decimal(str(first_row[2]))
-                spn = Decimal(str(first_row[3]))
-                spa = Decimal(str(first_row[4]))
-                total_item = sp + si + spn
-                left = total_item - spa
-                pay_for_first = min(remaining_amt, left)
-                remaining_amt -= pay_for_first
+            if first_row:
+                cur.execute("""
+                    SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
+                    FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+                    ORDER BY payment_no, id
+                """ % lid)
+                all_unpaid = cur.fetchall()
 
-                rem = pay_for_first
-                already_i = min(spa, si)
-                already_pn = min(spa - already_i, spn) if spa > si else Decimal('0')
-                need_i = si - already_i
-                need_pn = spn - already_pn
-                item_i = min(rem, need_i)
-                rem -= item_i
-                item_pn = min(rem, need_pn)
-                rem -= item_pn
-                item_pp = rem
-                i_p += item_i
-                pnp += item_pn
-                pp += item_pp
-                new_paid = spa + pay_for_first
-                ns = 'paid' if new_paid >= total_item else 'partial'
-                cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
+                for sr in all_unpaid:
+                    if remaining_amt <= 0:
+                        break
+                    sid = sr[0]
+                    sp = Decimal(str(sr[1]))
+                    si = Decimal(str(sr[2]))
+                    spn = Decimal(str(sr[3]))
+                    spa = Decimal(str(sr[4]))
+                    total_item = sp + si + spn
+                    left = total_item - spa
+                    if left <= 0:
+                        continue
+
+                    pay_for_item = min(remaining_amt, left)
+                    remaining_amt -= pay_for_item
+
+                    rem = pay_for_item
+                    already_i = min(spa, si)
+                    already_pn = min(spa - already_i, spn) if spa > si else Decimal('0')
+                    need_i = si - already_i
+                    need_pn = spn - already_pn
+
+                    item_i = min(rem, need_i)
+                    rem -= item_i
+                    item_pn = min(rem, need_pn)
+                    rem -= item_pn
+                    item_pp = rem
+
+                    i_p += item_i
+                    pnp += item_pn
+                    pp += item_pp
+
+                    new_paid = spa + pay_for_item
+                    ns = 'paid' if new_paid >= total_item else 'partial'
+                    cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
+                    updated_schedule_ids.append(sid)
 
                 if remaining_amt > 0:
-                    pp += remaining_amt
+                    extra_pp = min(remaining_amt, loan_bal - pp)
+                    if extra_pp > 0:
+                        pp += extra_pp
+                    remaining_amt -= extra_pp
             else:
                 pp = min(amt, loan_bal)
 
@@ -495,43 +481,31 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             """ % (lid, pd, float(amt), float(pp), float(i_p), float(pnp)))
 
             nb = loan_bal - pp
-            if nb < 0:
-                nb = Decimal('0')
+            if nb < 0: nb = Decimal('0')
             cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(nb), lid))
             if nb == 0:
                 cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % lid)
 
             recalc_schedule = None
-            schedule_auto_recalced = False
-
-            if nb > 0 and has_overpay and len(all_unpaid) > 1:
-                remaining_periods = len(all_unpaid) - 1
-                f_pay_date_parsed = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
-
-                do_recalc = False
-                recalc_term = remaining_periods
-                if is_significant and overpay_strategy:
-                    do_recalc = True
+            if nb > 0 and is_significant_overpay and overpay_strategy:
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+                remaining_periods = cur.fetchone()[0]
+                if remaining_periods > 0:
+                    last_paid_date = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
+                    cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+                    fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
                     if overpay_strategy == 'reduce_term':
-                        fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
                         best_term = remaining_periods
                         for t in range(1, remaining_periods + 1):
-                            _, m = fn(float(nb), l_rate, t, f_pay_date_parsed)
+                            _, m = fn(float(nb), l_rate, t, last_paid_date)
                             if m <= float(old_monthly) * 1.1:
                                 best_term = t
                                 break
                         if best_term >= remaining_periods:
                             best_term = max(remaining_periods - 1, 1)
-                        recalc_term = max(best_term, 1)
-                elif not is_significant and has_overpay:
-                    do_recalc = True
-                    recalc_term = remaining_periods
-                    schedule_auto_recalced = True
-
-                if do_recalc:
-                    cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue') AND id != %s" % (lid, all_unpaid[0][0]))
-                    fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
-                    new_sched, new_monthly = fn(float(nb), l_rate, recalc_term, f_pay_date_parsed)
+                        new_sched, new_monthly = fn(float(nb), l_rate, max(best_term, 1), last_paid_date)
+                    else:
+                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_periods, last_paid_date)
                     cur.execute("SELECT MAX(payment_no) FROM loan_schedule WHERE loan_id=%s" % lid)
                     max_no_row = cur.fetchone()
                     max_no = max_no_row[0] if max_no_row and max_no_row[0] else 0
@@ -547,16 +521,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             pay_detail = 'Сумма: %s, ОД: %s, %%: %s' % (float(amt), float(pp), float(i_p))
             if recalc_schedule:
-                strat_label = overpay_strategy if overpay_strategy else 'auto'
-                pay_detail += ', график пересчитан (%s)' % strat_label
+                pay_detail += ', график пересчитан (%s)' % overpay_strategy
             audit_log(cur, staff, 'payment', 'loan', lid, '', pay_detail, ip)
             conn.commit()
             result = {'success': True, 'new_balance': float(nb), 'principal_part': float(pp), 'interest_part': float(i_p), 'penalty_part': float(pnp)}
             if recalc_schedule:
                 result['schedule_recalculated'] = True
                 result['new_monthly'] = new_monthly
-                if schedule_auto_recalced:
-                    result['auto_recalculated'] = True
             return result
 
         elif action == 'early_repayment':
