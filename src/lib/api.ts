@@ -598,11 +598,24 @@ export interface Organization {
   updated_at: string;
 }
 
+export interface CabinetOrgInfo {
+  id: number;
+  name: string;
+  short_name: string;
+  inn: string;
+  kpp: string;
+  bank_name: string;
+  bik: string;
+  rs: string;
+  ks: string;
+}
+
 export interface CabinetOverview {
   info: { name: string; member_no: string; phone: string; email: string };
   loans: (Loan & { org_id?: number; org_name?: string; org_short_name?: string })[];
   savings: (Saving & { org_id?: number; org_name?: string; org_short_name?: string })[];
   shares: (ShareAccount & { org_id?: number; org_name?: string; org_short_name?: string })[];
+  organizations?: Record<string, CabinetOrgInfo>;
 }
 
 export default api;

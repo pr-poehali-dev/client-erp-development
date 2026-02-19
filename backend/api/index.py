@@ -2914,7 +2914,17 @@ def handle_cabinet(method, params, body, headers, cur):
             WHERE sa.member_id=%s ORDER BY sa.created_at DESC
         """ % member_id)
 
-        return {'info': info, 'loans': loans, 'savings': savings, 'shares': shares}
+        org_ids = set()
+        for item in loans + savings + shares:
+            if item.get('org_id'):
+                org_ids.add(item['org_id'])
+        orgs_map = {}
+        if org_ids:
+            org_rows = query_rows(cur, "SELECT id, name, short_name, inn, kpp, bank_name, bik, rs, ks FROM organizations WHERE id IN (%s)" % ','.join(str(i) for i in org_ids))
+            for o in org_rows:
+                orgs_map[o['id']] = o
+
+        return {'info': info, 'loans': loans, 'savings': savings, 'shares': shares, 'organizations': orgs_map}
 
     elif action == 'loan_detail':
         loan_id = params.get('id') or body.get('id')

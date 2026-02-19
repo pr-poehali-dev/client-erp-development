@@ -9,13 +9,61 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { CabinetOverview, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem } from "@/lib/api";
+import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem } from "@/lib/api";
+import { QRCodeSVG } from "qrcode.react";
+import { buildPaymentQRString } from "@/lib/payment-qr";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 
 const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично" };
 const statusVariant = (s: string) => s === "active" || s === "paid" ? "default" : s === "overdue" ? "destructive" : "secondary";
+
+const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
+  org: CabinetOrgInfo | undefined;
+  payerName: string;
+  contractNo: string;
+  sum: number;
+  label: string;
+}) => {
+  const [showQR, setShowQR] = useState(false);
+
+  if (!org || !org.rs || !org.bik || !org.bank_name) return null;
+
+  const qrString = buildPaymentQRString({
+    name: org.name,
+    personalAcc: org.rs,
+    bankName: org.bank_name,
+    bik: org.bik,
+    corrAcc: org.ks || "",
+    payeeINN: org.inn || "",
+    kpp: org.kpp || "",
+    lastName: payerName,
+    purpose: `${label} по договору ${contractNo}. ${payerName}`,
+    sum,
+  });
+
+  return (
+    <div className="mt-2" onClick={e => e.stopPropagation()}>
+      <button
+        className="flex items-center gap-1.5 text-xs text-primary hover:underline py-1"
+        onClick={() => setShowQR(!showQR)}
+      >
+        <Icon name="QrCode" size={14} />
+        {showQR ? "Скрыть QR" : `QR для оплаты · ${fmt(sum)}`}
+      </button>
+      {showQR && (
+        <div className="mt-2 p-3 bg-white rounded-lg border flex flex-col items-center gap-2">
+          <QRCodeSVG value={qrString} size={180} level="M" />
+          <div className="text-xs text-muted-foreground text-center">
+            Отсканируйте QR в мобильном банке
+          </div>
+          <div className="text-xs text-center font-medium">{fmt(sum)}</div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Cabinet = () => {
   const [data, setData] = useState<CabinetOverview | null>(null);
@@ -110,26 +158,39 @@ const Cabinet = () => {
   const totalSavings = data.savings.filter(s => s.status === "active").reduce((s, i) => s + (i.current_balance || i.amount), 0);
   const totalShares = data.shares.reduce((s, a) => s + a.balance, 0);
 
+  const orgsMap = data.organizations || {};
+
   const renderLoanCards = (loans: typeof data.loans) => (
     loans.length === 0 ? (
       <Card className="p-6 sm:p-8 text-center text-muted-foreground text-sm">У вас нет договоров займа</Card>
     ) : loans.map(loan => (
-      <Card key={loan.id} className="cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]" onClick={() => openLoan(loan)}>
+      <Card key={loan.id} className="hover:shadow-md transition-shadow active:scale-[0.99]">
         <CardContent className="p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Icon name="FileText" size={16} className="text-muted-foreground shrink-0" />
-              <span className="font-semibold text-sm truncate">{loan.contract_no}</span>
+          <div className="cursor-pointer" onClick={() => openLoan(loan)}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Icon name="FileText" size={16} className="text-muted-foreground shrink-0" />
+                <span className="font-semibold text-sm truncate">{loan.contract_no}</span>
+              </div>
+              <Badge variant={statusVariant(loan.status) as "default"|"destructive"|"secondary"} className="text-xs shrink-0 ml-2">{statusLabel[loan.status] || loan.status}</Badge>
             </div>
-            <Badge variant={statusVariant(loan.status) as "default"|"destructive"|"secondary"} className="text-xs shrink-0 ml-2">{statusLabel[loan.status] || loan.status}</Badge>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 text-sm">
+              <div><div className="text-xs text-muted-foreground">Сумма</div><div className="font-medium">{fmt(loan.amount)}</div></div>
+              <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{loan.rate}%</div></div>
+              <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
+              <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
+            </div>
+            <div className="text-xs text-muted-foreground mt-2">{fmtDate(loan.start_date)} — {fmtDate(loan.end_date)} / {loan.term_months} мес.</div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:gap-3 text-sm">
-            <div><div className="text-xs text-muted-foreground">Сумма</div><div className="font-medium">{fmt(loan.amount)}</div></div>
-            <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{loan.rate}%</div></div>
-            <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
-            <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
-          </div>
-          <div className="text-xs text-muted-foreground mt-2">{fmtDate(loan.start_date)} — {fmtDate(loan.end_date)} / {loan.term_months} мес.</div>
+          {(loan.status === "active" || loan.status === "overdue") && loan.org_id && (
+            <PaymentQR
+              org={orgsMap[String(loan.org_id)]}
+              payerName={userName}
+              contractNo={loan.contract_no}
+              sum={loan.monthly_payment}
+              label="Оплата займа"
+            />
+          )}
         </CardContent>
       </Card>
     ))
@@ -139,22 +200,33 @@ const Cabinet = () => {
     savings.length === 0 ? (
       <Card className="p-6 sm:p-8 text-center text-muted-foreground text-sm">У вас нет договоров сбережений</Card>
     ) : savings.map(s => (
-      <Card key={s.id} className="cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]" onClick={() => openSaving(s)}>
+      <Card key={s.id} className="hover:shadow-md transition-shadow active:scale-[0.99]">
         <CardContent className="p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Icon name="PiggyBank" size={16} className="text-muted-foreground shrink-0" />
-              <span className="font-semibold text-sm truncate">{s.contract_no}</span>
+          <div className="cursor-pointer" onClick={() => openSaving(s)}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Icon name="PiggyBank" size={16} className="text-muted-foreground shrink-0" />
+                <span className="font-semibold text-sm truncate">{s.contract_no}</span>
+              </div>
+              <Badge variant={s.status === "active" ? "default" : "secondary"} className="text-xs shrink-0 ml-2">{s.status === "active" ? "Активен" : "Закрыт"}</Badge>
             </div>
-            <Badge variant={s.status === "active" ? "default" : "secondary"} className="text-xs shrink-0 ml-2">{s.status === "active" ? "Активен" : "Закрыт"}</Badge>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 text-sm">
+              <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="font-medium">{fmt(s.amount)}</div></div>
+              <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{s.rate}%</div></div>
+              <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="font-medium text-green-600">{fmt(s.accrued_interest)}</div></div>
+              <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(s.current_balance || s.amount)}</div></div>
+            </div>
+            <div className="text-xs text-muted-foreground mt-2">{fmtDate(s.start_date)} — {fmtDate(s.end_date)} / {s.term_months} мес. / {s.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:gap-3 text-sm">
-            <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="font-medium">{fmt(s.amount)}</div></div>
-            <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{s.rate}%</div></div>
-            <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="font-medium text-green-600">{fmt(s.accrued_interest)}</div></div>
-            <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(s.current_balance || s.amount)}</div></div>
-          </div>
-          <div className="text-xs text-muted-foreground mt-2">{fmtDate(s.start_date)} — {fmtDate(s.end_date)} / {s.term_months} мес. / {s.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div>
+          {s.status === "active" && s.org_id && (
+            <PaymentQR
+              org={orgsMap[String(s.org_id)]}
+              payerName={userName}
+              contractNo={s.contract_no}
+              sum={10000}
+              label="Пополнение сбережений"
+            />
+          )}
         </CardContent>
       </Card>
     ))
