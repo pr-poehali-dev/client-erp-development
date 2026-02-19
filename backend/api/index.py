@@ -1111,7 +1111,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 return {'error': 'Вклад не найден или не активен'}
             s_amount, s_rate, s_start, s_pt = float(sv[0]), float(sv[1]), date.fromisoformat(str(sv[2])), sv[3]
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
-            new_end = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(s_start, new_term - 1))
+            new_end = add_months(s_start, new_term)
             cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
             cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'term_change','Изменение срока: %s мес., новая дата окончания: %s')" % (sid, date.today().isoformat(), new_term, fmt_date(new_end.isoformat())))
             audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес.' % new_term, ip)
@@ -1127,11 +1127,30 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s_amount, s_rate, s_term = float(sv[0]), float(sv[1]), int(sv[2])
             s_start, s_pt = date.fromisoformat(str(sv[3])), sv[4]
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, s_term, s_start, s_pt)
-            new_end = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(s_start, s_term - 1))
+            new_end = add_months(s_start, s_term)
             cur.execute("UPDATE savings SET end_date='%s', updated_at=NOW() WHERE id=%s" % (new_end.isoformat(), sid))
             audit_log(cur, staff, 'recalc_schedule', 'saving', sid, '', 'Пересчёт графика', ip)
             conn.commit()
             return {'success': True, 'schedule': schedule, 'new_end_date': new_end.isoformat()}
+        
+        elif action == 'recalc_all_active':
+            cur.execute("SELECT id, amount, rate, term_months, start_date, payout_type, contract_no FROM savings WHERE status='active'")
+            active_savings = cur.fetchall()
+            recalculated = 0
+            errors = []
+            for sv in active_savings:
+                sid, s_amount, s_rate, s_term, s_start_str, s_pt, cn = sv[0], float(sv[1]), float(sv[2]), int(sv[3]), str(sv[4]), sv[5], sv[6]
+                s_start = date.fromisoformat(s_start_str)
+                try:
+                    recalc_savings_schedule(cur, sid, s_amount, s_rate, s_term, s_start, s_pt)
+                    new_end = add_months(s_start, s_term)
+                    cur.execute("UPDATE savings SET end_date='%s', updated_at=NOW() WHERE id=%s" % (new_end.isoformat(), sid))
+                    audit_log(cur, staff, 'recalc_schedule', 'saving', sid, cn, 'Массовый пересчёт графика', ip)
+                    recalculated += 1
+                except Exception as e:
+                    errors.append({'contract_no': cn, 'error': str(e)})
+            conn.commit()
+            return {'success': True, 'recalculated': recalculated, 'total': len(active_savings), 'errors': errors}
 
         elif action == 'change_rate':
             sid = int(body['saving_id'])
