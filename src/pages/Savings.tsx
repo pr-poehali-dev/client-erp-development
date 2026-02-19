@@ -198,10 +198,10 @@ const Savings = () => {
     if (!detail || !backfillForm.date_from || !backfillForm.date_to) return;
     setSaving(true);
     try {
-      const res = await api.savings.backfillAccruals({
+      const res = await api.savings.backfillAccrue({
         saving_id: detail.id, date_from: backfillForm.date_from, date_to: backfillForm.date_to,
       });
-      toast({ title: "Проценты доначислены", description: `Дней: ${res.days_processed}, Сумма: ${fmt(res.total_accrued)}` });
+      toast({ title: "Проценты доначислены", description: `Дней: ${res.days_accrued}, Сумма: ${fmt(res.total_amount)}` });
       setShowBackfill(false);
       await refreshDetail();
     } catch (e) {
@@ -215,7 +215,7 @@ const Savings = () => {
     if (!detail || !rateChangeForm.new_rate) return;
     setSaving(true);
     try {
-      await api.savings.rateChange({
+      await api.savings.changeRate({
         saving_id: detail.id, new_rate: Number(rateChangeForm.new_rate),
         effective_date: rateChangeForm.effective_date, reason: rateChangeForm.reason,
       });
@@ -232,7 +232,7 @@ const Savings = () => {
   const handleDeleteTx = async (txId: number) => {
     if (!detail || !confirm("Удалить транзакцию?")) return;
     try {
-      await api.savings.deleteTx({ saving_id: detail.id, transaction_id: txId });
+      await api.savings.deleteTransaction(txId);
       toast({ title: "Транзакция удалена" });
       await refreshDetail();
     } catch (e) {
@@ -244,8 +244,8 @@ const Savings = () => {
     if (!detail || !editTxForm.amount) return;
     setSaving(true);
     try {
-      await api.savings.editTx({
-        saving_id: detail.id, transaction_id: editTxForm.transaction_id,
+      await api.savings.updateTransaction({
+        transaction_id: editTxForm.transaction_id,
         amount: Number(editTxForm.amount), transaction_date: editTxForm.transaction_date,
         description: editTxForm.description,
       });
