@@ -10,10 +10,11 @@ import { LoanDetail, LoanPayment, ScheduleItem } from "@/lib/api";
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 
-const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично" };
+const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
 const statusVariant = (s: string) => {
   if (s === "active" || s === "paid") return "default";
   if (s === "overdue") return "destructive";
+  if (s === "partial") return "warning";
   return "secondary";
 };
 
@@ -46,7 +47,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "principal_amount", label: "Осн. долг", render: (s: ScheduleItem) => fmt(s.principal_amount) },
     { key: "interest_amount", label: "Проценты", render: (s: ScheduleItem) => fmt(s.interest_amount) },
     { key: "balance_after", label: "Остаток", render: (s: ScheduleItem) => fmt(s.balance_after) },
-    { key: "status", label: "Статус", render: (s: ScheduleItem) => <Badge variant={statusVariant(s.status) as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[s.status] || s.status}</Badge> },
+    { key: "status", label: "Статус", render: (s: ScheduleItem) => <Badge variant={statusVariant(s.status) as "default"|"destructive"|"secondary"|"warning"} className="text-xs">{statusLabel[s.status] || s.status}</Badge> },
   ];
 
   const paymentCols: Column<LoanPayment>[] = [
@@ -72,7 +73,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
             <DialogTitle>{detail.contract_no}</DialogTitle>
             <div className="text-sm text-muted-foreground mt-1">{detail.member_name}</div>
           </div>
-          <Badge variant={statusVariant(detail.status) as "default"|"destructive"|"secondary"}>{statusLabel[detail.status] || detail.status}</Badge>
+          <Badge variant={statusVariant(detail.status) as "default"|"destructive"|"secondary"|"warning"}>{statusLabel[detail.status] || detail.status}</Badge>
         </DialogHeader>
 
         <div className="grid md:grid-cols-3 gap-4">

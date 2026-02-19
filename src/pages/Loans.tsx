@@ -13,10 +13,11 @@ import LoansActionDialogs from "./loans/LoansActionDialogs";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
-const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично" };
+const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично оплачен" };
 const statusVariant = (s: string) => {
   if (s === "active" || s === "paid") return "default";
   if (s === "overdue") return "destructive";
+  if (s === "partial") return "warning";
   return "secondary";
 };
 
@@ -30,7 +31,7 @@ const columns: Column<Loan>[] = [
   { key: "monthly_payment", label: "Платёж", render: (i: Loan) => fmt(i.monthly_payment) },
   { key: "balance", label: "Остаток", render: (i: Loan) => fmt(i.balance) },
   { key: "schedule_type", label: "График", render: (i: Loan) => <span className="text-xs">{i.schedule_type === "annuity" ? "Аннуитет" : "В конце срока"}</span> },
-  { key: "status", label: "Статус", render: (i: Loan) => <Badge variant={statusVariant(i.status) as "default"|"destructive"|"secondary"} className="text-xs">{statusLabel[i.status] || i.status}</Badge> },
+  { key: "status", label: "Статус", render: (i: Loan) => <Badge variant={statusVariant(i.status) as "default"|"destructive"|"secondary"|"warning"} className="text-xs">{statusLabel[i.status] || i.status}</Badge> },
   { key: "id", label: "", render: (i: Loan) => (
     <div className="flex gap-1" onClick={e => e.stopPropagation()}>
       <button className="p-1 rounded hover:bg-muted" title="Excel" onClick={() => api.export.download("loan", i.id, "xlsx")}><Icon name="FileSpreadsheet" size={14} className="text-green-600" /></button>
