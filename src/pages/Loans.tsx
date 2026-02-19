@@ -286,6 +286,19 @@ const Loans = () => {
     }
   };
 
+  const handleRebuildSchedule = async () => {
+    if (!detail || !confirm("Пересоздать график с даты начала договора? Платежи будут сохранены, статусы пересчитаны.")) return;
+    try {
+      const res = await api.loans.rebuildSchedule(detail.id);
+      toast({ title: "График пересоздан", description: `Периодов: ${res.periods}, платёж: ${res.monthly_payment}` });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -320,6 +333,7 @@ const Loans = () => {
         onEditPayment={openEditPayment}
         onDeletePayment={handleDeletePayment}
         onDeleteContract={handleDeleteContract}
+        onRebuildSchedule={handleRebuildSchedule}
       />
 
       <LoansActionDialogs

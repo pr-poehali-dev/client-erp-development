@@ -726,6 +726,27 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'removed_duplicates': removed, 'new_balance': float(real_balance)}
 
+        elif action == 'rebuild_schedule':
+            """Пересоздаёт график с оригинальной даты начала, сохраняя платежи"""
+            lid = int(body['loan_id'])
+            cur.execute("SELECT amount, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            orig_amount, r, orig_term = float(lr[0]), float(lr[1]), int(lr[2])
+            sd, st = date.fromisoformat(str(lr[3])), lr[4]
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
+            fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+            ns, m = fn(orig_amount, r, orig_term, sd)
+            for item in ns:
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+            ne = date.fromisoformat(ns[-1]['payment_date'])
+            cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (m, ne.isoformat(), lid))
+            recalc_loan_schedule_statuses(cur, lid)
+            audit_log(cur, staff, 'rebuild_schedule', 'loan', lid, '', 'Пересоздан график с %s, %s периодов' % (sd.isoformat(), orig_term), ip)
+            conn.commit()
+            return {'success': True, 'periods': len(ns), 'monthly_payment': m, 'end_date': ne.isoformat()}
+
         elif action == 'modify':
             lid = int(body['loan_id'])
             cur.execute("SELECT balance, rate, term_months, start_date, schedule_type FROM loans WHERE id=%s" % lid)

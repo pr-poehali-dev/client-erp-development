@@ -29,6 +29,7 @@ interface LoansDetailDialogProps {
   onEditPayment: (p: LoanPayment) => void;
   onDeletePayment: (id: number) => void;
   onDeleteContract: () => void;
+  onRebuildSchedule: () => void;
 }
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
@@ -94,7 +95,10 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
                 <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
               </div>
             )}
-            {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
+            {isAdmin && <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
+              <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
+            </div>}
           </div>
         )}
 
