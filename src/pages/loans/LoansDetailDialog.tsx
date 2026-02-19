@@ -31,6 +31,7 @@ interface LoansDetailDialogProps {
   onDeleteContract: () => void;
   onRebuildSchedule: () => void;
   onCheckStatus: () => void;
+  onRecalcStatuses: () => void;
 }
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
@@ -97,6 +98,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
               </div>
             )}
             {isAdmin && <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>
               <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>
               <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
               <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>

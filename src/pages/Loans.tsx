@@ -322,6 +322,19 @@ const Loans = () => {
     }
   };
 
+  const handleRecalcStatuses = async () => {
+    if (!detail || !confirm('Пересчитать статусы платежей на основе фактических платежей?')) return;
+    try {
+      await api.loans.recalcStatuses(detail.id);
+      toast({ title: "Статусы пересчитаны" });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -347,6 +360,7 @@ const Loans = () => {
       <LoansDetailDialog
         open={showDetail}
         onCheckStatus={handleCheckStatus}
+        onRecalcStatuses={handleRecalcStatuses}
         onOpenChange={setShowDetail}
         detail={detail}
         isAdmin={isAdmin}

@@ -166,30 +166,43 @@ def recalc_loan_schedule_statuses(cur, lid):
     for pay in payments:
         pay_date = str(pay[1])
         remaining = Decimal(str(pay[2]))
-        cur.execute("SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial') ORDER BY payment_no, id LIMIT 1" % lid)
-        first_row = cur.fetchone()
-        if first_row:
-            sid = first_row[0]
-            sp = Decimal(str(first_row[1]))
-            si = Decimal(str(first_row[2]))
-            spn = Decimal(str(first_row[3]))
-            spa = Decimal(str(first_row[4]))
+        
+        cur.execute("""
+            SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
+            FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
+            ORDER BY payment_no, id
+        """ % lid)
+        unpaid_rows = cur.fetchall()
+        
+        for row in unpaid_rows:
+            if remaining <= 0:
+                break
+            sid = row[0]
+            sp = Decimal(str(row[1]))
+            si = Decimal(str(row[2]))
+            spn = Decimal(str(row[3]))
+            spa = Decimal(str(row[4]))
+            
+            already_i = min(spa, si)
+            already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+            already_pp = spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0')
+            
+            need_i = si - already_i
+            need_pn = spn - already_pn
+            need_pp = sp - already_pp
+            
+            item_i = min(remaining, need_i)
+            remaining -= item_i
+            item_pn = min(remaining, need_pn)
+            remaining -= item_pn
+            item_pp = min(remaining, need_pp)
+            remaining -= item_pp
+            
             total_item = sp + si + spn
-            left = total_item - spa
-            applied = min(remaining, left)
-            remaining -= applied
-            new_paid = spa + applied
+            new_paid = spa + item_i + item_pn + item_pp
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
-        if remaining > 0:
-            if first_row:
-                cur.execute("UPDATE loan_schedule SET paid_amount=%s WHERE id=%s" % (float(new_paid + remaining), sid))
-            else:
-                cur.execute("SELECT id, paid_amount FROM loan_schedule WHERE loan_id=%s AND status='paid' ORDER BY payment_no DESC LIMIT 1" % lid)
-                last_paid = cur.fetchone()
-                if last_paid:
-                    old_pa = Decimal(str(last_paid[1]))
-                    cur.execute("UPDATE loan_schedule SET paid_amount=%s WHERE id=%s" % (float(old_pa + remaining), last_paid[0]))
+    
     refresh_loan_overdue_status(cur, lid)
 
 def esc(val):
@@ -514,14 +527,17 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     
                     already_i = min(spa, si)
                     already_pn = min(spa - si, spn) if spa > si else Decimal('0')
+                    already_pp = spa - already_i - already_pn if spa > already_i + already_pn else Decimal('0')
+                    
                     need_i = si - already_i
                     need_pn = spn - already_pn
+                    need_pp = sp - already_pp
                     
                     item_i = min(remaining_amt, need_i)
                     remaining_amt -= item_i
                     item_pn = min(remaining_amt, need_pn)
                     remaining_amt -= item_pn
-                    item_pp = remaining_amt if remaining_amt <= sp else sp
+                    item_pp = min(remaining_amt, need_pp)
                     remaining_amt -= item_pp
                     
                     i_p += item_i
@@ -786,6 +802,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             audit_log(cur, staff, 'fix_schedule', 'loan', lid, '', 'Удалено дублей: %s, пересчитан баланс: %s' % (removed, float(real_balance)), ip)
             conn.commit()
             return {'success': True, 'removed_duplicates': removed, 'new_balance': float(real_balance)}
+
+        elif action == 'recalc_statuses':
+            lid = int(body['loan_id'])
+            recalc_loan_schedule_statuses(cur, lid)
+            audit_log(cur, staff, 'recalc_statuses', 'loan', lid, '', 'Пересчёт статусов платежей', ip)
+            conn.commit()
+            return {'success': True}
 
         elif action == 'rebuild_schedule':
             """Пересоздаёт график с оригинальной даты начала, сохраняя платежи"""

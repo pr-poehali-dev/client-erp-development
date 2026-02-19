@@ -70,6 +70,8 @@ export const api = {
       request<{ success: boolean; periods: number; monthly_payment: number; end_date: string }>("POST", undefined, { entity: "loans", action: "rebuild_schedule", loan_id: loanId, ...(termMonths ? { term_months: termMonths } : {}), ...(rate ? { rate } : {}) }),
     checkStatus: (loanNumber: string) =>
       request<CheckStatusResult>("GET", { entity: "loans", action: "check_status", loan_number: loanNumber }),
+    recalcStatuses: (loanId: number) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "recalc_statuses", loan_id: loanId }),
   },
 
   savings: {
