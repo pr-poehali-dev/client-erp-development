@@ -462,23 +462,24 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             if nb > 0 and overpay_amount > 0:
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                 remaining_periods = cur.fetchone()[0]
-                if remaining_periods > 0:
+                remaining_after = remaining_periods - 1
+                if remaining_after > 0:
                     last_paid_date = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
                     cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
 
                     if is_significant_overpay and overpay_strategy == 'reduce_term':
-                        best_term = remaining_periods
-                        for t in range(1, remaining_periods + 1):
+                        best_term = remaining_after
+                        for t in range(1, remaining_after + 1):
                             _, m = fn(float(nb), l_rate, t, last_paid_date)
                             if m <= float(old_monthly) * 1.1:
                                 best_term = t
                                 break
-                        if best_term >= remaining_periods:
-                            best_term = max(remaining_periods - 1, 1)
+                        if best_term >= remaining_after:
+                            best_term = max(remaining_after - 1, 1)
                         new_sched, new_monthly = fn(float(nb), l_rate, max(best_term, 1), last_paid_date)
                     else:
-                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_periods, last_paid_date)
+                        new_sched, new_monthly = fn(float(nb), l_rate, remaining_after, last_paid_date)
                         if not is_significant_overpay:
                             auto_recalculated = True
 
