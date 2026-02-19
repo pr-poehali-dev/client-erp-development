@@ -58,7 +58,7 @@ const Savings = () => {
   const [showWithdrawal, setShowWithdrawal] = useState(false);
   const [withdrawalForm, setWithdrawalForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
   const [showModifyTerm, setShowModifyTerm] = useState(false);
-  const [modifyTermForm, setModifyTermForm] = useState({ new_term: "" });
+  const [modifyTermForm, setModifyTermForm] = useState({ new_term: "", effective_date: new Date().toISOString().slice(0, 10) });
   const [txFilterState, setTxFilterState] = useState<"all" | "transactions" | "accruals">("all");
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
@@ -183,7 +183,7 @@ const Savings = () => {
     if (!detail || !modifyTermForm.new_term) return;
     setSaving(true);
     try {
-      await api.savings.modifyTerm({ saving_id: detail.id, new_term_months: Number(modifyTermForm.new_term) });
+      await api.savings.modifyTerm({ saving_id: detail.id, new_term_months: Number(modifyTermForm.new_term), effective_date: modifyTermForm.effective_date });
       toast({ title: "Срок изменён" });
       setShowModifyTerm(false);
       await refreshDetail();

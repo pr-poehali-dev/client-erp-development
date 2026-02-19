@@ -85,7 +85,7 @@ export const api = {
       request<{ success: boolean; amount: number; max_payout: number }>("POST", undefined, { entity: "savings", action: "interest_payout", ...data }),
     partialWithdrawal: (data: { saving_id: number; amount: number; transaction_date?: string }) =>
       request<{ success: boolean; new_balance: number; min_balance: number }>("POST", undefined, { entity: "savings", action: "partial_withdrawal", ...data }),
-    modifyTerm: (data: { saving_id: number; new_term: number }) =>
+    modifyTerm: (data: { saving_id: number; new_term: number; effective_date?: string }) =>
       request<{ success: boolean; new_term: number; new_end_date: string; schedule: SavingsScheduleItem[] }>("POST", undefined, { entity: "savings", action: "modify_term", ...data }),
     backfillAccrue: (data: { saving_id: number; date_from?: string; date_to?: string }) =>
       request<{ success: boolean; days_accrued: number; total_amount: number; date_from: string; date_to: string }>("POST", undefined, { entity: "savings", action: "backfill_accrue", ...data }),

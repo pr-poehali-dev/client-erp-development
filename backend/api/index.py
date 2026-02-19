@@ -1126,6 +1126,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
         elif action == 'modify_term':
             sid = int(body['saving_id'])
             new_term = int(body['new_term'])
+            effective_date = body.get('effective_date', date.today().isoformat())
             cur.execute("SELECT amount, rate, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)
             sv = cur.fetchone()
             if not sv:
@@ -1134,8 +1135,8 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             schedule = recalc_savings_schedule(cur, sid, s_amount, s_rate, new_term, s_start, s_pt)
             new_end = add_months(s_start, new_term)
             cur.execute("UPDATE savings SET term_months=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (new_term, new_end.isoformat(), sid))
-            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'term_change','Изменение срока: %s мес., новая дата окончания: %s')" % (sid, date.today().isoformat(), new_term, fmt_date(new_end.isoformat())))
-            audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес.' % new_term, ip)
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',0,'term_change','Изменение срока: %s мес. с %s, новая дата окончания: %s')" % (sid, effective_date, new_term, fmt_date(effective_date), fmt_date(new_end.isoformat())))
+            audit_log(cur, staff, 'modify_term', 'saving', sid, '', 'Новый срок: %s мес. с %s' % (new_term, effective_date), ip)
             conn.commit()
             return {'success': True, 'new_term': new_term, 'new_end_date': new_end.isoformat(), 'schedule': schedule}
 

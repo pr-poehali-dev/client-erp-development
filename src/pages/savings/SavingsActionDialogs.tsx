@@ -36,8 +36,8 @@ interface SavingsActionDialogsProps {
   
   showModifyTerm: boolean;
   setShowModifyTerm: (v: boolean) => void;
-  modifyTermForm: { new_term: string };
-  setModifyTermForm: (v: { new_term: string }) => void;
+  modifyTermForm: { new_term: string; effective_date: string };
+  setModifyTermForm: (v: { new_term: string; effective_date: string }) => void;
   handleModifyTerm: () => void;
   
   showBackfill: boolean;
@@ -114,6 +114,7 @@ const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
           <div className="space-y-2">
             <div className="text-sm text-muted-foreground">Текущий срок: {detail ? detail.term_months + " мес." : "—"}</div>
             <div><Label>Новый срок (мес.)</Label><Input value={props.modifyTermForm.new_term} onChange={e => props.setModifyTermForm({ ...props.modifyTermForm, new_term: e.target.value })} /></div>
+            <div><Label>Дата вступления в силу</Label><Input type="date" value={props.modifyTermForm.effective_date} onChange={e => props.setModifyTermForm({ ...props.modifyTermForm, effective_date: e.target.value })} /></div>
           </div>
           <DialogFooter><Button onClick={props.handleModifyTerm} disabled={saving}>Изменить</Button></DialogFooter>
         </DialogContent>
