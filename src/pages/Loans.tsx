@@ -53,7 +53,7 @@ const Loans = () => {
   const [showModify, setShowModify] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isManager } = useAuth();
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", schedule_type: "annuity", start_date: new Date().toISOString().slice(0, 10), org_id: "" });
   const [payForm, setPayForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
@@ -290,7 +290,7 @@ const Loans = () => {
     <div className="p-6 space-y-4">
       <PageHeader
         title="Займы"
-        action={isAdmin ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
+        action={isAdmin || isManager ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
       >
         <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
       </PageHeader>

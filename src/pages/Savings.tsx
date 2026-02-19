@@ -43,7 +43,7 @@ const Savings = () => {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isManager } = useAuth();
 
   const [showDetail, setShowDetail] = useState(false);
   const [detail, setDetail] = useState<SavingDetail | null>(null);
@@ -298,7 +298,7 @@ const Savings = () => {
     <div className="p-6 space-y-4">
       <PageHeader
         title="Сбережения"
-        action={isAdmin ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
+        action={isAdmin || isManager ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
       >
         <div className="flex gap-2">
           <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
