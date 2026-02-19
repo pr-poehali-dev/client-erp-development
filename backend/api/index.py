@@ -1176,7 +1176,9 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
 
         elif action == 'change_rate':
             sid = int(body['saving_id'])
-            new_rate = float(body['new_rate'])
+            if body.get('new_rate') is None:
+                return resp(400, {'error': 'Не указана новая ставка'})
+            new_rate = float(str(body['new_rate']).replace(',', '.'))
             effective_date = body.get('effective_date', date.today().isoformat())
             reason = body.get('reason', '')
             cur.execute("SELECT rate, amount, term_months, start_date, payout_type FROM savings WHERE id=%s AND status='active'" % sid)

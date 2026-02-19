@@ -216,7 +216,7 @@ const Savings = () => {
     setSaving(true);
     try {
       await api.savings.changeRate({
-        saving_id: detail.id, new_rate: Number(rateChangeForm.new_rate),
+        saving_id: detail.id, new_rate: Number(rateChangeForm.new_rate.replace(",", ".")),
         effective_date: rateChangeForm.effective_date, reason: rateChangeForm.reason,
       });
       toast({ title: "Ставка изменена" });
