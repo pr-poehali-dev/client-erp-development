@@ -27,6 +27,7 @@ interface LoansDetailDialogProps {
   onModify: () => void;
   onEditPayment: (p: LoanPayment) => void;
   onDeletePayment: (id: number) => void;
+  onDeleteContract: () => void;
 }
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
@@ -83,11 +84,16 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
 
-        {detail.status === "active" && isAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
-            <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
-            <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
+        {isAdmin && (
+          <div className="flex flex-wrap gap-2 justify-between">
+            {detail.status === "active" && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
+                <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
+                <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
+              </div>
+            )}
+            <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
           </div>
         )}
 

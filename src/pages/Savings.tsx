@@ -281,6 +281,19 @@ const Savings = () => {
     }
   };
 
+  const handleDeleteContract = async () => {
+    if (!detail || !confirm(`Удалить договор сбережений ${detail.contract_no}? Все связанные данные будут удалены.`)) return;
+    try {
+      await api.savings.deleteContract(detail.id);
+      toast({ title: "Договор удалён" });
+      setShowDetail(false);
+      setDetail(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -326,6 +339,7 @@ const Savings = () => {
         onRateChange={() => setShowRateChange(true)}
         onDeleteTx={handleDeleteTx}
         onEditTx={openEditTx}
+        onDeleteContract={handleDeleteContract}
       />
 
       <SavingsActionDialogs

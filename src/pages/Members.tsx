@@ -120,6 +120,25 @@ const Members = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!editingId) return;
+    const memberName = form.last_name ? `${form.last_name} ${form.first_name} ${form.middle_name || ''}`.trim() : form.company_name;
+    if (!confirm(`Удалить пайщика "${memberName}"? Это действие необратимо.\n\nПайщик не может быть удалён при наличии активных займов, сбережений или паевых счетов.`)) return;
+    setSaving(true);
+    try {
+      await api.members.delete(editingId);
+      toast({ title: "Пайщик удалён" });
+      setShowForm(false);
+      setForm({});
+      setEditingId(null);
+      loadMembers();
+    } catch (e: unknown) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Icon name="Loader2" size={32} className="animate-spin text-primary" /></div>;
   }
@@ -221,12 +240,20 @@ const Members = () => {
                 </>
               )}
 
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
-                <Button onClick={handleSave} disabled={saving || !form.last_name || !form.inn} className="gap-2">
-                  {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                  {editingId ? "Сохранить изменения" : "Сохранить"}
-                </Button>
+              <div className="flex justify-between gap-2 pt-4">
+                {editingId && (
+                  <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+                    <Icon name="Trash2" size={16} className="mr-2" />
+                    Удалить пайщика
+                  </Button>
+                )}
+                <div className="flex gap-2 ml-auto">
+                  <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
+                  <Button onClick={handleSave} disabled={saving || !form.last_name || !form.inn} className="gap-2">
+                    {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                    {editingId ? "Сохранить изменения" : "Сохранить"}
+                  </Button>
+                </div>
               </div>
             </TabsContent>
 
@@ -265,12 +292,20 @@ const Members = () => {
                 </>
               )}
 
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
-                <Button onClick={handleSave} disabled={saving || !form.inn || !form.company_name} className="gap-2">
-                  {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
-                  {editingId ? "Сохранить изменения" : "Сохранить"}
-                </Button>
+              <div className="flex justify-between gap-2 pt-4">
+                {editingId && (
+                  <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+                    <Icon name="Trash2" size={16} className="mr-2" />
+                    Удалить пайщика
+                  </Button>
+                )}
+                <div className="flex gap-2 ml-auto">
+                  <Button variant="outline" onClick={() => setShowForm(false)}>Отмена</Button>
+                  <Button onClick={handleSave} disabled={saving || !form.inn || !form.company_name} className="gap-2">
+                    {saving ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+                    {editingId ? "Сохранить изменения" : "Сохранить"}
+                  </Button>
+                </div>
               </div>
             </TabsContent>
           </Tabs>

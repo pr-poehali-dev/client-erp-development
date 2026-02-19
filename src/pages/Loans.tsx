@@ -273,6 +273,19 @@ const Loans = () => {
     setShowEditPayment(true);
   };
 
+  const handleDeleteContract = async () => {
+    if (!detail || !confirm(`Удалить договор займа ${detail.contract_no}? Все связанные данные будут удалены.`)) return;
+    try {
+      await api.loans.deleteContract(detail.id);
+      toast({ title: "Договор удалён" });
+      setShowDetail(false);
+      setDetail(null);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -305,6 +318,7 @@ const Loans = () => {
         onModify={() => setShowModify(true)}
         onEditPayment={openEditPayment}
         onDeletePayment={handleDeletePayment}
+        onDeleteContract={handleDeleteContract}
       />
 
       <LoansActionDialogs

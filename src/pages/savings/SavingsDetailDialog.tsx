@@ -27,6 +27,7 @@ interface SavingsDetailDialogProps {
   onRateChange: () => void;
   onDeleteTx: (id: number) => void;
   onEditTx: (tx: SavingTransaction) => void;
+  onDeleteContract: () => void;
 }
 
 const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
@@ -90,15 +91,20 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
 
-        {detail.status === "active" && isAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={props.onDeposit}><Icon name="Plus" size={14} className="mr-1" />Пополнение</Button>
-            <Button size="sm" onClick={props.onInterest} disabled={detail.accrued_interest <= 0}><Icon name="DollarSign" size={14} className="mr-1" />Выплатить %</Button>
-            <Button size="sm" onClick={props.onWithdrawal}><Icon name="Minus" size={14} className="mr-1" />Изъятие</Button>
-            <Button size="sm" onClick={props.onModifyTerm}><Icon name="Calendar" size={14} className="mr-1" />Изменить срок</Button>
-            <Button size="sm" onClick={props.onRateChange}><Icon name="Percent" size={14} className="mr-1" />Изменить ставку</Button>
-            <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
-            <Button size="sm" variant="destructive" onClick={props.onEarlyClose}><Icon name="XCircle" size={14} className="mr-1" />Досрочное закрытие</Button>
+        {isAdmin && (
+          <div className="flex flex-wrap gap-2 justify-between">
+            {detail.status === "active" && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={props.onDeposit}><Icon name="Plus" size={14} className="mr-1" />Пополнение</Button>
+                <Button size="sm" onClick={props.onInterest} disabled={detail.accrued_interest <= 0}><Icon name="DollarSign" size={14} className="mr-1" />Выплатить %</Button>
+                <Button size="sm" onClick={props.onWithdrawal}><Icon name="Minus" size={14} className="mr-1" />Изъятие</Button>
+                <Button size="sm" onClick={props.onModifyTerm}><Icon name="Calendar" size={14} className="mr-1" />Изменить срок</Button>
+                <Button size="sm" onClick={props.onRateChange}><Icon name="Percent" size={14} className="mr-1" />Изменить ставку</Button>
+                <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
+                <Button size="sm" variant="destructive" onClick={props.onEarlyClose}><Icon name="XCircle" size={14} className="mr-1" />Досрочное закрытие</Button>
+              </div>
+            )}
+            <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
           </div>
         )}
 

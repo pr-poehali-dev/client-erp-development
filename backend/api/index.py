@@ -276,6 +276,27 @@ def handle_members(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
         return {'success': True}
 
+    elif method == 'DELETE':
+        member_id = params.get('id')
+        cur.execute("SELECT member_no, CASE WHEN member_type='FL' THEN CONCAT(last_name,' ',first_name,' ',middle_name) ELSE company_name END as name FROM members WHERE id=%s" % member_id)
+        mem = cur.fetchone()
+        if not mem:
+            return {'error': 'Пайщик не найден'}
+        member_no, member_name = mem[0], mem[1]
+        cur.execute("SELECT COUNT(*) FROM loans WHERE member_id=%s AND status='active'" % member_id)
+        if cur.fetchone()[0] > 0:
+            return {'error': 'Нельзя удалить пайщика с активными займами'}
+        cur.execute("SELECT COUNT(*) FROM savings WHERE member_id=%s AND status='active'" % member_id)
+        if cur.fetchone()[0] > 0:
+            return {'error': 'Нельзя удалить пайщика с активными сбережениями'}
+        cur.execute("SELECT COUNT(*) FROM share_accounts WHERE member_id=%s AND status='active'" % member_id)
+        if cur.fetchone()[0] > 0:
+            return {'error': 'Нельзя удалить пайщика с активными паевыми счетами'}
+        cur.execute("DELETE FROM members WHERE id=%s" % member_id)
+        audit_log(cur, staff, 'delete', 'member', member_id, member_no, member_name, ip)
+        conn.commit()
+        return {'success': True}
+
 def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
     if method == 'GET':
         action = params.get('action', 'list')

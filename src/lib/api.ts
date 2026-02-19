@@ -37,6 +37,7 @@ export const api = {
     get: (id: number) => request<MemberDetail>("GET", { entity: "members", id }),
     create: (data: Partial<MemberDetail>) => request<{ id: number; member_no: string }>("POST", undefined, { entity: "members", ...data }),
     update: (data: Partial<MemberDetail>) => request<{ success: boolean }>("PUT", { entity: "members" }, { entity: "members", ...data }),
+    delete: (memberId: number) => request<{ success: boolean }>("DELETE", { entity: "members", id: memberId }),
   },
 
   loans: {
