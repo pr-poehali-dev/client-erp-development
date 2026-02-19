@@ -131,14 +131,15 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center px-3 py-6 sm:p-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-            <Icon name="Shield" size={32} className="text-white" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-3 sm:mb-4">
+            <Icon name="Shield" size={28} className="text-white sm:hidden" />
+            <Icon name="Shield" size={32} className="text-white hidden sm:block" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Личный кабинет</h1>
-          <p className="text-muted-foreground text-sm mt-1">Кредитный потребительский кооператив</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Личный кабинет</h1>
+          <p className="text-muted-foreground text-xs sm:text-sm mt-1">Кредитный потребительский кооператив</p>
         </div>
 
         <Card className="shadow-lg">
@@ -155,11 +156,11 @@ const Login = () => {
           <CardContent>
             {step === "choose" && (
               <div className="space-y-3">
-                <Button className="w-full gap-2 h-12" variant="outline" onClick={() => setStep("login_form")}>
+                <Button className="w-full gap-2 h-12 text-sm" variant="outline" onClick={() => setStep("login_form")}>
                   <Icon name="User" size={18} />
                   Войти по логину и паролю
                 </Button>
-                <Button className="w-full gap-2 h-12" variant="outline" onClick={() => setStep("phone")}>
+                <Button className="w-full gap-2 h-12 text-sm" variant="outline" onClick={() => setStep("phone")}>
                   <Icon name="Smartphone" size={18} />
                   Войти по номеру телефона
                 </Button>
@@ -217,7 +218,7 @@ const Login = () => {
                     onChange={e => setCode(e.target.value)}
                     placeholder="______"
                     maxLength={6}
-                    className="text-center text-2xl tracking-[0.5em] font-mono"
+                    className="text-center text-xl sm:text-2xl tracking-[0.3em] sm:tracking-[0.5em] font-mono"
                     onKeyDown={e => e.key === "Enter" && handleVerifySms()}
                   />
                   <p className="text-xs text-muted-foreground">Введите код из SMS, отправленного на {phone}</p>
