@@ -96,6 +96,8 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "update_transaction", ...data }),
     deleteTransaction: (transactionId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "savings", action: "delete_transaction", transaction_id: transactionId }),
+    recalcAllActive: () =>
+      request<{ success: boolean; recalculated: number; total: number; errors: { contract_no: string; error: string }[] }>("POST", undefined, { entity: "savings", action: "recalc_all_active" }),
   },
 
   shares: {

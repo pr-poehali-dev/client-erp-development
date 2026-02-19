@@ -264,13 +264,37 @@ const Savings = () => {
     setShowEditTx(true);
   };
 
+  const handleRecalcAll = async () => {
+    if (!confirm("Пересчитать графики для всех активных договоров сбережений?")) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.recalcAllActive();
+      toast({ title: "Пересчёт выполнен", description: `Обработано: ${res.recalculated} из ${res.total}` });
+      if (res.errors && res.errors.length > 0) {
+        console.error("Ошибки при пересчёте:", res.errors);
+      }
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
         title="Сбережения"
         action={isAdmin ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
       >
-        <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
+        <div className="flex gap-2">
+          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
+          {isAdmin && (
+            <button onClick={handleRecalcAll} disabled={saving} className="px-3 py-1 text-sm border rounded hover:bg-muted" title="Пересчитать все графики">
+              <Icon name="RefreshCw" size={16} />
+            </button>
+          )}
+        </div>
       </PageHeader>
 
       <DataTable columns={columns} data={filtered} loading={loading} onRowClick={openDetail} />
