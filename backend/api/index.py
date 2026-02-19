@@ -115,7 +115,7 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
         period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
         period_end = last_day_of_month(add_months(start_date, i - 1))
         actual_days = (period_end - period_start).days
-        interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(actual_days)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(actual_days)) / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         cumulative += interest
         balance_after = float(amt + cumulative) if payout_type == 'end_of_term' else float(amt)
         schedule.append({
@@ -773,7 +773,7 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
                 days = (period_end - ss).days
             r = get_rate_on_date(ss)
             if days > 0 and current_bal > 0:
-                day_interest = (current_bal * r / Decimal('100') * Decimal(str(days)) / Decimal('360')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                day_interest = (current_bal * r / Decimal('100') * Decimal(str(days)) / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 interest += day_interest
             if j + 1 < len(split_dates):
                 for bd, ba in bal_changes:
@@ -904,7 +904,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 if cur.fetchone():
                     return {'statusCode': 400, 'headers': cors, 'body': json.dumps({'error': 'Договор с номером %s уже существует' % cn})}
             schedule = calc_savings_schedule(a, r, t, sd, pt)
-            ed = date.fromisoformat(schedule[-1]['period_end']) if schedule else last_day_of_month(add_months(sd, t - 1))
+            ed = add_months(sd, t)
             cur.execute("INSERT INTO savings (contract_no,member_id,amount,rate,term_months,payout_type,start_date,end_date,current_balance,status,min_balance_pct,org_id) VALUES ('%s',%s,%s,%s,%s,'%s','%s','%s',%s,'active',%s,%s) RETURNING id" % (esc(cn), mid, a, r, t, pt, sd.isoformat(), ed.isoformat(), a, mbp, org_id if org_id else 'NULL'))
             sid = cur.fetchone()[0]
             for item in schedule:
