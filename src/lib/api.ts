@@ -68,6 +68,8 @@ export const api = {
       request<{ success: boolean; removed_duplicates: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "fix_schedule", loan_id: loanId }),
     rebuildSchedule: (loanId: number, termMonths?: number, rate?: number) =>
       request<{ success: boolean; periods: number; monthly_payment: number; end_date: string }>("POST", undefined, { entity: "loans", action: "rebuild_schedule", loan_id: loanId, ...(termMonths ? { term_months: termMonths } : {}), ...(rate ? { rate } : {}) }),
+    checkStatus: (loanNumber: string) =>
+      request<CheckStatusResult>("GET", { entity: "loans", action: "check_status", loan_number: loanNumber }),
   },
 
   savings: {
@@ -242,6 +244,37 @@ export interface DashboardStats {
   overdue_loan_list: OverdueLoanItem[];
   expiring_savings: ExpiringSavingItem[];
   expiring_savings_total: number;
+}
+
+export interface CheckStatusResult {
+  loan_id: number;
+  loan_number: string;
+  schedule: Array<{
+    payment_no: number;
+    payment_date: string;
+    principal: number;
+    interest: number;
+    penalty: number;
+    paid_amount: number;
+    status: string;
+    paid_date: string | null;
+  }>;
+  payments: Array<{
+    payment_date: string;
+    amount: number;
+    principal: number;
+    interest: number;
+    penalty: number;
+  }>;
+  total_paid_from_schedule: number;
+  total_paid_from_payments: number;
+  last_paid_period: string | null;
+  stats: {
+    paid: number;
+    partial: number;
+    pending: number;
+    overdue: number;
+  };
 }
 
 export interface Member {

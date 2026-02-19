@@ -306,16 +306,7 @@ const Loans = () => {
   const handleCheckStatus = async () => {
     if (!detail) return;
     try {
-      const token = localStorage.getItem('staff_token');
-      const url = `https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450/loans?action=check_status&loan_number=${detail.contract_no}`;
-      const res = await fetch(url, {
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-Auth-Token': token || ''
-        }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
+      const data = await api.loans.checkStatus(detail.contract_no);
       console.log('=== ДИАГНОСТИКА СТАТУСОВ ===');
       console.log('Договор:', data.loan_number);
       console.log('Всего платежей по графику:', data.schedule.length);
