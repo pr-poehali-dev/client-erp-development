@@ -328,6 +328,7 @@ const Savings = () => {
         onOpenChange={setShowDetail}
         detail={detail}
         isAdmin={isAdmin}
+        isManager={isManager}
         txFilterState={txFilterState}
         setTxFilterState={setTxFilterState}
         onDeposit={() => setShowDeposit(true)}

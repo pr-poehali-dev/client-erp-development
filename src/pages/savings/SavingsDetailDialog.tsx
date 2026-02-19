@@ -16,6 +16,7 @@ interface SavingsDetailDialogProps {
   onOpenChange: (v: boolean) => void;
   detail: SavingDetail | null;
   isAdmin: boolean;
+  isManager: boolean;
   txFilterState: "all" | "transactions" | "accruals";
   setTxFilterState: (v: "all" | "transactions" | "accruals") => void;
   onDeposit: () => void;
@@ -31,7 +32,7 @@ interface SavingsDetailDialogProps {
 }
 
 const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
-  const { open, onOpenChange, detail, isAdmin, txFilterState, setTxFilterState } = props;
+  const { open, onOpenChange, detail, isAdmin, isManager, txFilterState, setTxFilterState } = props;
 
   if (!detail) return null;
 
@@ -40,10 +41,10 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
     { key: "transaction_type", label: "Тип", render: (t: SavingTransaction) => <span className="text-xs">{ttLabels[t.transaction_type] || t.transaction_type}</span> },
     { key: "amount", label: "Сумма", render: (t: SavingTransaction) => <span className={t.transaction_type === "withdrawal" || t.transaction_type === "partial_withdrawal" ? "text-red-600" : ""}>{fmt(t.amount)}</span> },
     { key: "description", label: "Примечание", render: (t: SavingTransaction) => <span className="text-xs text-muted-foreground">{t.description || "—"}</span> },
-    { key: "id", label: "", render: (t: SavingTransaction) => isAdmin && t.transaction_type !== "opening" && t.transaction_type !== "closing" ? (
+    { key: "id", label: "", render: (t: SavingTransaction) => (isAdmin || isManager) && t.transaction_type !== "opening" && t.transaction_type !== "closing" ? (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
         <button onClick={() => props.onEditTx(t)} className="p-1 rounded hover:bg-muted"><Icon name="Pencil" size={14} /></button>
-        <button onClick={() => props.onDeleteTx(t.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>
+        {isAdmin && <button onClick={() => props.onDeleteTx(t.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
       </div>
     ) : null }
   ];
@@ -91,7 +92,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
 
-        {isAdmin && (
+        {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
             {detail.status === "active" && (
               <div className="flex flex-wrap gap-2">
@@ -104,7 +105,7 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" variant="destructive" onClick={props.onEarlyClose}><Icon name="XCircle" size={14} className="mr-1" />Досрочное закрытие</Button>
               </div>
             )}
-            <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
+            {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
           </div>
         )}
 

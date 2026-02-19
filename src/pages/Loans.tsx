@@ -313,6 +313,7 @@ const Loans = () => {
         onOpenChange={setShowDetail}
         detail={detail}
         isAdmin={isAdmin}
+        isManager={isManager}
         onPayment={() => setShowPayment(true)}
         onEarlyRepay={() => setShowEarly(true)}
         onModify={() => setShowModify(true)}

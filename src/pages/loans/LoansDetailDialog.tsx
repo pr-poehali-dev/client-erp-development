@@ -22,6 +22,7 @@ interface LoansDetailDialogProps {
   onOpenChange: (v: boolean) => void;
   detail: LoanDetail | null;
   isAdmin: boolean;
+  isManager: boolean;
   onPayment: () => void;
   onEarlyRepay: () => void;
   onModify: () => void;
@@ -31,7 +32,7 @@ interface LoansDetailDialogProps {
 }
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
-  const { open, onOpenChange, detail, isAdmin } = props;
+  const { open, onOpenChange, detail, isAdmin, isManager } = props;
 
   if (!detail) return null;
 
@@ -52,10 +53,10 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "interest_part", label: "Проценты", render: (p: LoanPayment) => fmt(p.interest_part) },
     { key: "penalty_part", label: "Штрафы", render: (p: LoanPayment) => p.penalty_part > 0 ? fmt(p.penalty_part) : "—" },
     { key: "description", label: "Примечание", render: (p: LoanPayment) => <span className="text-xs text-muted-foreground">{p.description || "—"}</span> },
-    { key: "id", label: "", render: (p: LoanPayment) => isAdmin ? (
+    { key: "id", label: "", render: (p: LoanPayment) => (isAdmin || isManager) ? (
       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
         <button onClick={() => props.onEditPayment(p)} className="p-1 rounded hover:bg-muted"><Icon name="Pencil" size={14} /></button>
-        <button onClick={() => props.onDeletePayment(p.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>
+        {isAdmin && <button onClick={() => props.onDeletePayment(p.id)} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>}
       </div>
     ) : null }
   ];
@@ -84,7 +85,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
         </div>
 
-        {isAdmin && (
+        {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
             {detail.status === "active" && (
               <div className="flex flex-wrap gap-2">
@@ -93,7 +94,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
                 <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
               </div>
             )}
-            <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
+            {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
           </div>
         )}
 
