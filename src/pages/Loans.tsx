@@ -287,10 +287,14 @@ const Loans = () => {
   };
 
   const handleRebuildSchedule = async () => {
-    if (!detail || !confirm("Пересоздать график с даты начала договора? Платежи будут сохранены, статусы пересчитаны.")) return;
+    if (!detail) return;
+    const termInput = prompt(`Пересоздать график с даты начала (${detail.start_date}).\nУкажите срок в месяцах:`, String(detail.term_months));
+    if (!termInput) return;
+    const term = parseInt(termInput);
+    if (!term || term < 1) { toast({ title: "Некорректный срок", variant: "destructive" }); return; }
     try {
-      const res = await api.loans.rebuildSchedule(detail.id);
-      toast({ title: "График пересоздан", description: `Периодов: ${res.periods}, платёж: ${res.monthly_payment}` });
+      const res = await api.loans.rebuildSchedule(detail.id, term);
+      toast({ title: "График пересоздан", description: `Периодов: ${res.periods}, платёж: ${fmt(res.monthly_payment)}` });
       const d = await api.loans.get(detail.id);
       setDetail(d);
       load();

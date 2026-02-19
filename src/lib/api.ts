@@ -66,8 +66,8 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_payment", payment_id: paymentId }),
     fixSchedule: (loanId: number) =>
       request<{ success: boolean; removed_duplicates: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "fix_schedule", loan_id: loanId }),
-    rebuildSchedule: (loanId: number) =>
-      request<{ success: boolean; periods: number; monthly_payment: number; end_date: string }>("POST", undefined, { entity: "loans", action: "rebuild_schedule", loan_id: loanId }),
+    rebuildSchedule: (loanId: number, termMonths?: number, rate?: number) =>
+      request<{ success: boolean; periods: number; monthly_payment: number; end_date: string }>("POST", undefined, { entity: "loans", action: "rebuild_schedule", loan_id: loanId, ...(termMonths ? { term_months: termMonths } : {}), ...(rate ? { rate } : {}) }),
   },
 
   savings: {

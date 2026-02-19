@@ -733,7 +733,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             lr = cur.fetchone()
             if not lr:
                 return {'error': 'Договор не найден'}
-            orig_amount, r, orig_term = float(lr[0]), float(lr[1]), int(lr[2])
+            orig_amount = float(lr[0])
+            r = safe_float(body['rate'], 'ставка') if body.get('rate') else float(lr[1])
+            orig_term = safe_int(body['term_months'], 'срок') if body.get('term_months') else int(lr[2])
             sd, st = date.fromisoformat(str(lr[3])), lr[4]
             cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
             fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
@@ -741,7 +743,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             for item in ns:
                 cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
             ne = date.fromisoformat(ns[-1]['payment_date'])
-            cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (m, ne.isoformat(), lid))
+            cur.execute("UPDATE loans SET rate=%s, term_months=%s, monthly_payment=%s, end_date='%s', updated_at=NOW() WHERE id=%s" % (r, orig_term, m, ne.isoformat(), lid))
             recalc_loan_schedule_statuses(cur, lid)
             audit_log(cur, staff, 'rebuild_schedule', 'loan', lid, '', 'Пересоздан график с %s, %s периодов' % (sd.isoformat(), orig_term), ip)
             conn.commit()
