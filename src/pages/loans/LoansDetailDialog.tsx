@@ -87,7 +87,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
 
         {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
-            {detail.status === "active" && (
+            {(detail.status === "active" || detail.status === "overdue") && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={props.onPayment}><Icon name="DollarSign" size={14} className="mr-1" />Внести платёж</Button>
                 <Button size="sm" onClick={props.onEarlyRepay}><Icon name="Zap" size={14} className="mr-1" />Досрочное погашение</Button>
