@@ -121,9 +121,16 @@ def calc_savings_schedule(amount, rate, term, start_date, payout_type):
     amt = Decimal(str(amount))
     schedule = []
     cumulative = Decimal('0')
+    close_date = add_months(start_date, term)
     for i in range(1, term + 1):
-        period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
-        period_end = last_day_of_month(add_months(start_date, i - 1))
+        if i == 1:
+            period_start = start_date
+        else:
+            period_start = last_day_of_month(add_months(start_date, i - 1))
+        if i == term:
+            period_end = close_date
+        else:
+            period_end = last_day_of_month(add_months(start_date, i))
         actual_days = (period_end - period_start).days
         interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(actual_days)) / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         cumulative += interest
