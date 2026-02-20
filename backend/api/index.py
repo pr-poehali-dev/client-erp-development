@@ -1111,9 +1111,16 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
                 r = rc_r
         return r
 
+    close_date = add_months(start_date, term)
     for i in range(1, term + 1):
-        period_start = last_day_of_month(add_months(start_date, i - 2)) if i > 1 else start_date
-        period_end = last_day_of_month(add_months(start_date, i - 1))
+        if i == 1:
+            period_start = start_date
+        else:
+            period_start = last_day_of_month(add_months(start_date, i - 1))
+        if i == term:
+            period_end = close_date
+        else:
+            period_end = last_day_of_month(add_months(start_date, i))
         running_bal = Decimal('0')
         for bd, ba in bal_changes:
             if bd <= period_start:
