@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,24 +48,20 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
   const [error, setError] = useState("");
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
-  const loadReport = async () => {
+  useEffect(() => {
+    if (!open) {
+      setReport(null);
+      setExpandedRows(new Set());
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
-    try {
-      const data = await api.loans.reconciliationReport(loanId);
-      setReport(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Ошибка загрузки");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOpen = (v: boolean) => {
-    onOpenChange(v);
-    if (v && !report) loadReport();
-    if (!v) { setReport(null); setExpandedRows(new Set()); }
-  };
+    api.loans.reconciliationReport(loanId)
+      .then(setReport)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Ошибка загрузки"))
+      .finally(() => setLoading(false));
+  }, [open, loanId]);
 
   const toggleRow = (id: number) => {
     setExpandedRows(prev => {
@@ -137,7 +133,7 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
   const { summary } = report || {};
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between pr-8">
