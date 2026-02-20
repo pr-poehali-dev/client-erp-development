@@ -223,13 +223,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
 
-            # Если платёж полностью закрыл период и остался остаток —
-            # это переплата, которая идёт в ОД, НЕ в проценты следующего периода.
-            # Останавливаемся: следующий период не трогаем.
-            if ns == 'paid' and remaining > Decimal('0.005'):
-                pay_pp += remaining
-                remaining = Decimal('0')
-                break
+            # Остаток платежа переходит на следующие периоды в цикле
         
         cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
             float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
