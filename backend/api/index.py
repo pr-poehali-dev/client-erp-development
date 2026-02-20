@@ -143,7 +143,7 @@ def refresh_loan_overdue_status(cur, lid):
     
     cur.execute("""
         SELECT COUNT(*) FROM loan_schedule
-        WHERE loan_id=%s AND status = 'pending'
+        WHERE loan_id=%s AND status IN ('pending', 'overdue')
           AND payment_date < CURRENT_DATE
     """ % lid)
     has_overdue = cur.fetchone()[0] > 0
@@ -152,7 +152,7 @@ def refresh_loan_overdue_status(cur, lid):
         cur.execute("UPDATE loans SET status='overdue', updated_at=NOW() WHERE id=%s AND status='active'" % lid)
         cur.execute("""
             UPDATE loan_schedule SET status='overdue', overdue_days=(CURRENT_DATE - payment_date)
-            WHERE loan_id=%s AND status = 'pending' AND payment_date < CURRENT_DATE
+            WHERE loan_id=%s AND status IN ('pending') AND payment_date < CURRENT_DATE
         """ % lid)
     else:
         cur.execute("UPDATE loans SET status='active', updated_at=NOW() WHERE id=%s AND status='overdue'" % lid)
