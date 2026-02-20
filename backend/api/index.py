@@ -978,16 +978,49 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             recalc_loan_schedule_statuses(cur, lid)
 
-            total_paid_principal = Decimal('0')
             cur.execute("SELECT COALESCE(SUM(principal_part),0) FROM loan_payments WHERE loan_id=%s" % lid)
             total_paid_principal = Decimal(str(cur.fetchone()[0]))
             real_balance = Decimal(str(orig_amount)) - total_paid_principal
             if real_balance < 0:
                 real_balance = Decimal('0')
             cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(real_balance), lid))
+
             if real_balance == 0:
                 cur.execute("UPDATE loans SET status='closed', updated_at=NOW() WHERE id=%s" % lid)
             else:
+                # Пересоздаём pending-строки графика от правильного баланса
+                # Берём последний оплаченный период как точку отсчёта
+                cur.execute("""
+                    SELECT payment_date, payment_no FROM loan_schedule
+                    WHERE loan_id=%s AND status='paid'
+                    ORDER BY payment_no DESC LIMIT 1
+                """ % lid)
+                last_paid = cur.fetchone()
+
+                cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+                pending_count = cur.fetchone()[0]
+
+                if last_paid and pending_count > 0 and real_balance > 0:
+                    last_paid_date = last_paid[0] if isinstance(last_paid[0], date) else date.fromisoformat(str(last_paid[0]))
+                    last_paid_no = last_paid[1]
+
+                    cur.execute("UPDATE loan_schedule SET status='deleted_fix' WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
+
+                    fn = calc_annuity_schedule if st == 'annuity' else calc_end_of_term_schedule
+                    new_sched, new_monthly = fn(float(real_balance), r, pending_count, last_paid_date)
+
+                    for item in new_sched:
+                        cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (
+                            lid, last_paid_no + item['payment_no'], item['payment_date'],
+                            item['payment_amount'], item['principal_amount'],
+                            item['interest_amount'], item['balance_after']))
+
+                    ne = date.fromisoformat(new_sched[-1]['payment_date'])
+                    new_term = last_paid_no + len(new_sched)
+                    cur.execute("UPDATE loans SET monthly_payment=%s, end_date='%s', term_months=%s, updated_at=NOW() WHERE id=%s" % (
+                        new_monthly, ne.isoformat(), new_term, lid))
+                    removed += pending_count
+
                 refresh_loan_overdue_status(cur, lid)
 
             audit_log(cur, staff, 'fix_schedule', 'loan', lid, '', 'Удалено дублей: %s, пересчитан баланс: %s' % (removed, float(real_balance)), ip)
