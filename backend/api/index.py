@@ -476,14 +476,12 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     take = min(remaining, to_cover)
                     to_cover -= take
                     pr[2] -= take  # remaining
-                    ratio = take / pay_total if pay_total > 0 else Decimal('1')
-                    take_pp = (Decimal(str(sch['plan_principal'])) * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    take_ip = (Decimal(str(sch['plan_interest'])) * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    take_pnp = (Decimal(str(sch['plan_penalty'])) * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    # Не выходим за рамки оставшихся частей платежа
-                    take_pp = min(take_pp, pp_left)
-                    take_ip = min(take_ip, ip_left)
-                    take_pnp = min(take_pnp, pnp_left)
+                    # Берём ОД/% из платежа напрямую (они уже рассчитаны при внесении):
+                    # сначала штраф, затем проценты, ОД — остаток
+                    take_pnp = min(pnp_left, take)
+                    after_pnp = take - take_pnp
+                    take_ip = min(ip_left, after_pnp)
+                    take_pp = after_pnp - take_ip
                     pr[3] -= take_pp
                     pr[4] -= take_ip
                     pr[5] -= take_pnp
