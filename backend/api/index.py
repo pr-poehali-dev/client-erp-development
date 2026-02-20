@@ -491,6 +491,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                         'payment_id': pay_id,
                         'fact_date': str(pay_date),
                         'amount': round(float(take), 2),
+                        'fact_amount': round(float(pay_total), 2),
                         'principal': round(float(take_pp), 2),
                         'interest': round(float(take_ip), 2),
                         'penalty': round(float(take_pnp), 2),

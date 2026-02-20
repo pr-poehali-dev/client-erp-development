@@ -265,15 +265,33 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {row.payments.map((p, idx) => (
-                                    <tr key={idx} className="border-t border-muted">
-                                      <td className="py-1 pr-4 font-medium">{fmtDate(p.fact_date)}</td>
-                                      <td className="py-1 pr-4 text-right font-semibold text-green-700">{fmt(p.amount)}</td>
-                                      <td className="py-1 pr-4 text-right">{fmt(p.principal)}</td>
-                                      <td className="py-1 pr-4 text-right">{fmt(p.interest)}</td>
-                                      <td className="py-1 text-right">{p.penalty > 0 ? fmt(p.penalty) : "—"}</td>
-                                    </tr>
-                                  ))}
+                                  {row.payments.map((p, idx) => {
+                                    const overpay = p.fact_amount - p.amount;
+                                    return (
+                                      <>
+                                        <tr key={idx} className="border-t border-muted">
+                                          <td className="py-1 pr-4 font-medium">{fmtDate(p.fact_date)}</td>
+                                          <td className="py-1 pr-4 text-right font-semibold text-green-700">{fmt(p.amount)}</td>
+                                          <td className="py-1 pr-4 text-right">{fmt(p.principal)}</td>
+                                          <td className="py-1 pr-4 text-right">{fmt(p.interest)}</td>
+                                          <td className="py-1 text-right">{p.penalty > 0 ? fmt(p.penalty) : "—"}</td>
+                                        </tr>
+                                        {p.fact_amount > 0 && (
+                                          <tr key={`${idx}-fact`} className="border-t border-dashed border-muted/60 bg-muted/10">
+                                            <td className="py-1 pr-4 text-muted-foreground italic">Итого внесено</td>
+                                            <td className="py-1 pr-4 text-right font-semibold">{fmt(p.fact_amount)}</td>
+                                            <td colSpan={2} className="py-1 pr-4 text-right text-muted-foreground text-xs">
+                                              {Math.abs(overpay) > 0.005 && (overpay > 0
+                                                ? <span className="text-green-600">переплата +{fmt(overpay)}</span>
+                                                : <span className="text-red-600">недоплата −{fmt(Math.abs(overpay))}</span>
+                                              )}
+                                            </td>
+                                            <td></td>
+                                          </tr>
+                                        )}
+                                      </>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </td>

@@ -581,6 +581,7 @@ export interface ReconciliationSchedulePayment {
   payment_id: number;
   fact_date: string;
   amount: number;
+  fact_amount: number;
   principal: number;
   interest: number;
   penalty: number;
