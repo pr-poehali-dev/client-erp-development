@@ -740,11 +740,27 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             recalc_schedule = None
             auto_recalculated = False
 
-            if nb > 0 and overpay_amount > 0:
+            # Пересчёт нужен если была любая переплата (pp > плановый ОД периода)
+            actual_overpay = pp - (f_sp - f_spa if first_row else Decimal('0')) if first_row else Decimal('0')
+            if actual_overpay < 0:
+                actual_overpay = Decimal('0')
+            should_recalc = nb > 0 and (overpay_amount > 0 or actual_overpay > Decimal('0.005'))
+
+            if should_recalc:
                 cur.execute("SELECT COUNT(*) FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                 remaining_periods = cur.fetchone()[0]
                 if remaining_periods > 0:
-                    last_paid_date = date.fromisoformat(str(f_pay_date)) if isinstance(f_pay_date, str) else f_pay_date
+                    # Берём дату последнего оплаченного периода как базу для пересчёта
+                    cur.execute("""
+                        SELECT payment_date FROM loan_schedule
+                        WHERE loan_id=%s AND status='paid'
+                        ORDER BY payment_no DESC LIMIT 1
+                    """ % lid)
+                    last_paid_row = cur.fetchone()
+                    if last_paid_row:
+                        last_paid_date = last_paid_row[0] if isinstance(last_paid_row[0], date) else date.fromisoformat(str(last_paid_row[0]))
+                    else:
+                        last_paid_date = date.fromisoformat(pd)
                     cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')" % lid)
                     fn = calc_annuity_schedule if l_stype == 'annuity' else calc_end_of_term_schedule
 
