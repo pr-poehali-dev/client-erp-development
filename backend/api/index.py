@@ -459,7 +459,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 pay_id, pay_date, pay_amt, pay_pp, pay_ip, pay_pnp, pay_type = pay_row
                 pay_remaining.append([pay_id, pay_date, Decimal(str(pay_amt)),
                                       Decimal(str(pay_pp)), Decimal(str(pay_ip)),
-                                      Decimal(str(pay_pnp)), pay_type, Decimal(str(pay_amt))])
+                                      Decimal(str(pay_pnp)), pay_type, Decimal(str(pay_amt)),
+                                      Decimal(str(pay_pp)), Decimal(str(pay_ip)), Decimal(str(pay_pnp))])
 
             pay_idx = 0
             for sch in schedule_list:
@@ -469,7 +470,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                 to_cover = sch_paid
                 while to_cover > Decimal('0.005') and pay_idx < len(pay_remaining):
                     pr = pay_remaining[pay_idx]
-                    pay_id, pay_date, remaining, pp_left, ip_left, pnp_left, pay_type, pay_total = pr
+                    pay_id, pay_date, remaining, pp_left, ip_left, pnp_left, pay_type, pay_total, pay_pp_d, pay_ip_d, pay_pnp_d = pr
                     if remaining <= Decimal('0.005'):
                         pay_idx += 1
                         continue
@@ -493,6 +494,9 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                         'principal': round(float(take_pp), 2),
                         'interest': round(float(take_ip), 2),
                         'penalty': round(float(take_pnp), 2),
+                        'pay_principal': round(float(pay_pp_d), 2),
+                        'pay_interest': round(float(pay_ip_d), 2),
+                        'pay_penalty': round(float(pay_pnp_d), 2),
                         'payment_type': pay_type,
                     })
                     if pr[2] <= Decimal('0.005'):
