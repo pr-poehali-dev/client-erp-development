@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { api, ReconciliationReport, ReconciliationScheduleRow } from "@/lib/api";
 import Icon from "@/components/ui/icon";
+import * as XLSX from "xlsx";
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -73,16 +75,97 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
     });
   };
 
+  const exportToExcel = () => {
+    if (!report) return;
+    const { loan, schedule, summary: s } = report;
+    const fmtN = (n: number) => Math.round(n * 100) / 100;
+    const fmtD = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
+
+    const wb = XLSX.utils.book_new();
+
+    // Лист 1: Сводка
+    const summaryData = [
+      ["Отчёт по сверке платежей"],
+      ["Договор:", loan.contract_no],
+      ["Заёмщик:", loan.member_name],
+      ["Сумма займа:", fmtN(loan.amount)],
+      ["Ставка:", loan.rate + "%"],
+      ["Срок:", loan.term_months + " мес."],
+      ["Начало:", fmtD(loan.start_date)],
+      ["Окончание:", fmtD(loan.end_date)],
+      ["Статус:", loan.status],
+      [],
+      ["ИТОГИ"],
+      ["По плану (всего):", fmtN(s.total_plan)],
+      ["Фактически оплачено:", fmtN(s.total_paid)],
+      ["Разница:", fmtN(s.total_diff)],
+      ["Просроченный долг:", fmtN(s.total_overdue)],
+      [],
+      ["Периодов всего:", s.periods_total],
+      ["Оплачено:", s.periods_paid],
+      ["Частично:", s.periods_partial],
+      ["Просрочено:", s.periods_overdue],
+      ["Ожидается:", s.periods_pending],
+    ];
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+    wsSummary["!cols"] = [{ wch: 28 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, "Сводка");
+
+    // Лист 2: График (план vs факт)
+    const scheduleHeader = ["№ периода", "Плановая дата", "Сумма по плану", "ОД (план)", "% (план)", "Штраф (план)", "Оплачено факт", "Разница", "Статус", "Дата оплаты факт"];
+    const scheduleRows = schedule.map(r => [
+      r.payment_no,
+      fmtD(r.plan_date),
+      fmtN(r.plan_total),
+      fmtN(r.plan_principal),
+      fmtN(r.plan_interest),
+      fmtN(r.plan_penalty),
+      fmtN(r.paid_amount),
+      fmtN(r.plan_total - r.paid_amount),
+      r.status === "paid" ? "Оплачен" : r.status === "partial" ? "Частично" : r.status === "overdue" ? "Просрочен" : "Ожидается",
+      r.paid_date ? fmtD(r.paid_date) : "",
+    ]);
+    scheduleRows.push(["ИТОГО", "", fmtN(s.total_plan), "", "", "", fmtN(s.total_paid), fmtN(s.total_diff), "", ""]);
+    const wsSchedule = XLSX.utils.aoa_to_sheet([scheduleHeader, ...scheduleRows]);
+    wsSchedule["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsSchedule, "План vs Факт");
+
+    // Лист 3: Расшифровка платежей по периодам
+    const detailHeader = ["№ периода", "Плановая дата", "Дата платежа (факт)", "Засчитано в период", "ОД", "%", "Штраф"];
+    const detailRows: (string | number)[][] = [];
+    for (const row of schedule) {
+      if (row.payments.length === 0) {
+        detailRows.push([row.payment_no, fmtD(row.plan_date), "—", 0, 0, 0, 0]);
+      } else {
+        for (const p of row.payments) {
+          detailRows.push([row.payment_no, fmtD(row.plan_date), fmtD(p.fact_date), fmtN(p.amount), fmtN(p.principal), fmtN(p.interest), fmtN(p.penalty)]);
+        }
+      }
+    }
+    const wsDetail = XLSX.utils.aoa_to_sheet([detailHeader, ...detailRows]);
+    wsDetail["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsDetail, "Расшифровка");
+
+    XLSX.writeFile(wb, `Сверка_${loan.contract_no}.xlsx`);
+  };
+
   const { summary } = report || {};
 
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Icon name="FileSearch" size={18} />
-            Сверка платежей — {contractNo}
-          </DialogTitle>
+          <div className="flex items-center justify-between pr-8">
+            <DialogTitle className="flex items-center gap-2">
+              <Icon name="FileSearch" size={18} />
+              Сверка платежей — {contractNo}
+            </DialogTitle>
+            {report && (
+              <Button size="sm" variant="outline" onClick={exportToExcel}>
+                <Icon name="Download" size={14} className="mr-1" />Excel
+              </Button>
+            )}
+          </div>
         </DialogHeader>
 
         {loading && (
