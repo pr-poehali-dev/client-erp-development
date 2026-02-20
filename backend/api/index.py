@@ -390,6 +390,144 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     'overdue': len([s for s in schedule if s['status'] == 'overdue'])
                 }
             }
+        elif action == 'reconciliation_report':
+            lid = params.get('id')
+            if not lid:
+                return {'error': 'Не указан id договора'}
+            loan = query_one(cur, "SELECT * FROM loans WHERE id=%s" % lid)
+            if not loan:
+                return {'error': 'Договор не найден'}
+            cur.execute("SELECT CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name,' ',m.middle_name) ELSE m.company_name END FROM members m WHERE m.id=%s" % loan['member_id'])
+            nr = cur.fetchone()
+            loan['member_name'] = nr[0] if nr else ''
+
+            cur.execute("""
+                SELECT id, payment_no, payment_date, payment_amount, principal_amount, interest_amount,
+                       COALESCE(penalty_amount,0) as penalty_amount, COALESCE(paid_amount,0) as paid_amount,
+                       status, paid_date
+                FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no, id
+            """ % lid)
+            schedule_rows = cur.fetchall()
+
+            cur.execute("""
+                SELECT id, payment_date, amount, principal_part, interest_part, COALESCE(penalty_part,0) as penalty_part, payment_type
+                FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id
+            """ % lid)
+            payment_rows = cur.fetchall()
+
+            schedule_list = []
+            for r in schedule_rows:
+                sch_id, pno, pdate, pamt, princ, inter, penal, paid, status, paid_date = r
+                total = float(Decimal(str(princ)) + Decimal(str(inter)) + Decimal(str(penal)))
+                schedule_list.append({
+                    'id': sch_id,
+                    'payment_no': pno,
+                    'plan_date': str(pdate),
+                    'plan_amount': float(pamt),
+                    'plan_principal': float(princ),
+                    'plan_interest': float(inter),
+                    'plan_penalty': float(penal),
+                    'plan_total': round(total, 2),
+                    'paid_amount': float(paid),
+                    'status': status,
+                    'paid_date': str(paid_date) if paid_date else None,
+                    'payments': []
+                })
+
+            sch_by_id = {s['id']: s for s in schedule_list}
+
+            sim_remaining = {}
+            for pay_row in payment_rows:
+                pay_id, pay_date, pay_amt, pay_pp, pay_ip, pay_pnp, pay_type = pay_row
+                pay_amt_d = Decimal(str(pay_amt))
+                remaining = pay_amt_d
+                pay_distributions = []
+
+                for sch in schedule_list:
+                    if remaining <= Decimal('0'):
+                        break
+                    s_id = sch['id']
+                    sp = Decimal(str(sch['plan_principal']))
+                    si = Decimal(str(sch['plan_interest']))
+                    spn = Decimal(str(sch['plan_penalty']))
+                    already = Decimal(str(sim_remaining.get(s_id, 0)))
+                    total_item = sp + si + spn
+                    need = total_item - already
+                    if need <= Decimal('0'):
+                        continue
+                    take = min(remaining, need)
+                    remaining -= take
+                    sim_remaining[s_id] = float(already + take)
+
+                    take_i = min(take, si - min(already, si))
+                    take_after_i = take - take_i
+                    take_pn = min(take_after_i, spn - max(Decimal('0'), min(already - si, spn))) if already < si + spn else Decimal('0')
+                    take_pp = take - take_i - take_pn
+
+                    pay_distributions.append({
+                        'schedule_id': s_id,
+                        'payment_no': sch['payment_no'],
+                        'plan_date': sch['plan_date'],
+                        'amount': round(float(take), 2),
+                        'principal': round(float(take_pp), 2),
+                        'interest': round(float(take_i), 2),
+                        'penalty': round(float(take_pn), 2),
+                    })
+
+                pay_info = {
+                    'id': pay_id,
+                    'fact_date': str(pay_date),
+                    'amount': float(pay_amt),
+                    'principal_part': float(pay_pp),
+                    'interest_part': float(pay_ip),
+                    'penalty_part': float(pay_pnp),
+                    'payment_type': pay_type,
+                    'distributions': pay_distributions,
+                    'leftover': round(float(remaining), 2),
+                }
+
+                for dist in pay_distributions:
+                    sid = dist['schedule_id']
+                    if sid in sch_by_id:
+                        sch_by_id[sid]['payments'].append({
+                            'payment_id': pay_id,
+                            'fact_date': str(pay_date),
+                            'amount': dist['amount'],
+                            'principal': dist['principal'],
+                            'interest': dist['interest'],
+                            'penalty': dist['penalty'],
+                        })
+
+            total_plan = sum(s['plan_total'] for s in schedule_list)
+            total_paid = sum(float(r[2]) for r in payment_rows)
+            total_overdue = sum(s['plan_total'] - s['paid_amount'] for s in schedule_list if s['status'] in ('overdue', 'partial') and s['plan_date'] < date.today().isoformat())
+
+            return {
+                'loan': {
+                    'id': loan['id'],
+                    'contract_no': loan['contract_no'],
+                    'member_name': loan['member_name'],
+                    'amount': float(loan['amount']),
+                    'rate': float(loan['rate']),
+                    'term_months': loan['term_months'],
+                    'start_date': str(loan['start_date']),
+                    'end_date': str(loan['end_date']),
+                    'status': loan['status'],
+                    'balance': float(loan['balance']),
+                },
+                'schedule': schedule_list,
+                'summary': {
+                    'total_plan': round(total_plan, 2),
+                    'total_paid': round(total_paid, 2),
+                    'total_diff': round(total_plan - total_paid, 2),
+                    'total_overdue': round(total_overdue, 2),
+                    'periods_total': len(schedule_list),
+                    'periods_paid': len([s for s in schedule_list if s['status'] == 'paid']),
+                    'periods_partial': len([s for s in schedule_list if s['status'] == 'partial']),
+                    'periods_overdue': len([s for s in schedule_list if s['status'] == 'overdue']),
+                    'periods_pending': len([s for s in schedule_list if s['status'] == 'pending']),
+                }
+            }
         elif action == 'schedule':
             a, r, t = safe_float(params['amount'], 'сумма'), safe_float(params['rate'], 'ставка'), safe_int(params['term'], 'срок')
             st = params.get('schedule_type', 'annuity')

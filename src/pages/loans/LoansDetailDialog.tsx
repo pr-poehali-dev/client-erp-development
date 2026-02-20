@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { LoanDetail, LoanPayment, ScheduleItem } from "@/lib/api";
+import LoanReconciliationReport from "./LoanReconciliationReport";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -37,6 +39,7 @@ interface LoansDetailDialogProps {
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
   const { open, onOpenChange, detail, isAdmin, isManager } = props;
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
 
   if (!detail) return null;
 
@@ -74,6 +77,13 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
   ];
 
   return (
+    <>
+    <LoanReconciliationReport
+      open={reconciliationOpen}
+      onOpenChange={setReconciliationOpen}
+      loanId={detail.id}
+      contractNo={detail.contract_no}
+    />
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader className="flex flex-row items-start justify-between">
@@ -106,12 +116,17 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
                 <Button size="sm" onClick={props.onModify}><Icon name="Settings" size={14} className="mr-1" />Изменить условия</Button>
               </div>
             )}
-            {isAdmin && <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>
-              <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>
-              <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
-              <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
-            </div>}
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setReconciliationOpen(true)}>
+                <Icon name="FileSearch" size={14} className="mr-1" />Сверка платежей
+              </Button>
+              {isAdmin && <>
+                <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>
+                <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>
+                <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
+                <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>
+              </>}
+            </div>
           </div>
         )}
 
@@ -131,6 +146,7 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
         </Tabs>
       </DialogContent>
     </Dialog>
+    </>
   );
 };
 

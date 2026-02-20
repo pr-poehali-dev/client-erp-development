@@ -72,6 +72,8 @@ export const api = {
       request<CheckStatusResult>("GET", { entity: "loans", action: "check_status", loan_number: loanNumber }),
     recalcStatuses: (loanId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "recalc_statuses", loan_id: loanId }),
+    reconciliationReport: (loanId: number) =>
+      request<ReconciliationReport>("GET", { entity: "loans", action: "reconciliation_report", id: loanId }),
   },
 
   savings: {
@@ -573,6 +575,57 @@ export interface StaffUser {
   member_id: number | null;
   last_login: string | null;
   created_at: string;
+}
+
+export interface ReconciliationSchedulePayment {
+  payment_id: number;
+  fact_date: string;
+  amount: number;
+  principal: number;
+  interest: number;
+  penalty: number;
+}
+
+export interface ReconciliationScheduleRow {
+  id: number;
+  payment_no: number;
+  plan_date: string;
+  plan_amount: number;
+  plan_principal: number;
+  plan_interest: number;
+  plan_penalty: number;
+  plan_total: number;
+  paid_amount: number;
+  status: string;
+  paid_date: string | null;
+  payments: ReconciliationSchedulePayment[];
+}
+
+export interface ReconciliationReport {
+  loan: {
+    id: number;
+    contract_no: string;
+    member_name: string;
+    amount: number;
+    rate: number;
+    term_months: number;
+    start_date: string;
+    end_date: string;
+    status: string;
+    balance: number;
+  };
+  schedule: ReconciliationScheduleRow[];
+  summary: {
+    total_plan: number;
+    total_paid: number;
+    total_diff: number;
+    total_overdue: number;
+    periods_total: number;
+    periods_paid: number;
+    periods_partial: number;
+    periods_overdue: number;
+    periods_pending: number;
+  };
 }
 
 export interface AuditLogEntry {
