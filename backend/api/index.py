@@ -169,8 +169,12 @@ def recalc_loan_schedule_statuses(cur, lid):
     cur.execute("SELECT id, payment_date, amount FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
     for pay in payments:
+        pay_id = pay[0]
         pay_date = str(pay[1])
         remaining = Decimal(str(pay[2]))
+        pay_pp = Decimal('0')
+        pay_ip = Decimal('0')
+        pay_pnp = Decimal('0')
         
         cur.execute("""
             SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
@@ -203,10 +207,17 @@ def recalc_loan_schedule_statuses(cur, lid):
             item_pp = min(remaining, need_pp)
             remaining -= item_pp
             
+            pay_ip += item_i
+            pay_pnp += item_pn
+            pay_pp += item_pp
+            
             total_item = sp + si + spn
             new_paid = spa + item_i + item_pn + item_pp
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
+        
+        cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
+            float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
     
     refresh_loan_overdue_status(cur, lid)
 
