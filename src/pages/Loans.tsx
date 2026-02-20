@@ -10,6 +10,7 @@ import api, { toNum, Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organi
 import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
+import LoanReconciliationReport from "./loans/LoanReconciliationReport";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
@@ -69,6 +70,7 @@ const Loans = () => {
   const [showOverpayChoice, setShowOverpayChoice] = useState(false);
   const [overpayOptions, setOverpayOptions] = useState<Record<string, { new_monthly: number; new_term: number; description: string }>>({});
   const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
+  const [showReconciliation, setShowReconciliation] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -373,7 +375,17 @@ const Loans = () => {
         onDeletePayment={handleDeletePayment}
         onDeleteContract={handleDeleteContract}
         onRebuildSchedule={handleRebuildSchedule}
+        onReconciliation={() => setShowReconciliation(true)}
       />
+
+      {detail && (
+        <LoanReconciliationReport
+          open={showReconciliation}
+          onOpenChange={setShowReconciliation}
+          loanId={detail.id}
+          contractNo={detail.contract_no}
+        />
+      )}
 
       <LoansActionDialogs
         detail={detail}
