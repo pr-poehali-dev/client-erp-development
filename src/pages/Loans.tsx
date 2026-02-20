@@ -325,6 +325,19 @@ const Loans = () => {
     }
   };
 
+  const handleFixSchedule = async () => {
+    if (!detail || !confirm('Исправить дубли и пересчитать баланс по договору?')) return;
+    try {
+      const res = await api.loans.fixSchedule(detail.id);
+      toast({ title: "График исправлен", description: `Удалено дублей: ${res.removed_duplicates}, баланс: ${fmt(res.new_balance)}` });
+      const d = await api.loans.get(detail.id);
+      setDetail(d);
+      load();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
   const handleRecalcStatuses = async () => {
     if (!detail || !confirm('Пересчитать статусы платежей на основе фактических платежей?')) return;
     try {
@@ -376,6 +389,7 @@ const Loans = () => {
         onDeleteContract={handleDeleteContract}
         onRebuildSchedule={handleRebuildSchedule}
         onReconciliation={() => setShowReconciliation(true)}
+        onFixSchedule={handleFixSchedule}
       />
 
       {detail && (
