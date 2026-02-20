@@ -199,13 +199,14 @@ def recalc_loan_schedule_statuses(cur, lid):
             need_i = si - already_i
             need_pn = spn - already_pn
             need_pp = sp - already_pp
-            
-            item_i = min(remaining, need_i)
-            remaining -= item_i
-            item_pn = min(remaining, need_pn)
-            remaining -= item_pn
-            item_pp = min(remaining, need_pp)
-            remaining -= item_pp
+            need_total = need_i + need_pn + need_pp
+
+            take_total = min(remaining, need_total)
+            item_i = min(take_total, need_i)
+            after_i = take_total - item_i
+            item_pn = min(after_i, need_pn)
+            item_pp = after_i - item_pn
+            remaining -= take_total
             
             pay_ip += item_i
             pay_pnp += item_pn
@@ -215,6 +216,11 @@ def recalc_loan_schedule_statuses(cur, lid):
             new_paid = spa + item_i + item_pn + item_pp
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
+        
+        # Остаток сверх закрытых периодов — досрочное погашение ОД
+        if remaining > 0:
+            pay_pp += remaining
+            remaining = Decimal('0')
         
         cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
             float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
@@ -682,13 +688,19 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     need_i = si - already_i
                     need_pn = spn - already_pn
                     need_pp = sp - already_pp
+                    need_total = need_i + need_pn + need_pp
+
+                    # Берём не больше чем нужно для ЗАКРЫТИЯ текущего периода.
+                    # Переплата сверх периода НЕ идёт на проценты следующего —
+                    # она учитывается как погашение ОД (pp) и пересчитывает график.
+                    take_total = min(remaining_amt, need_total)
                     
-                    item_i = min(remaining_amt, need_i)
-                    remaining_amt -= item_i
-                    item_pn = min(remaining_amt, need_pn)
-                    remaining_amt -= item_pn
-                    item_pp = min(remaining_amt, need_pp)
-                    remaining_amt -= item_pp
+                    item_i = min(take_total, need_i)
+                    after_i = take_total - item_i
+                    item_pn = min(after_i, need_pn)
+                    item_pp = after_i - item_pn
+                    
+                    remaining_amt -= take_total
                     
                     i_p += item_i
                     pnp += item_pn
@@ -698,6 +710,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     new_paid = spa + item_i + item_pn + item_pp
                     ns = 'paid' if new_paid >= total_item else 'partial'
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
+
+                # Любой остаток сверх закрытых периодов — досрочное погашение ОД
+                if remaining_amt > 0:
+                    pp += remaining_amt
+                    remaining_amt = Decimal('0')
             else:
                 pp = min(amt, loan_bal)
 
