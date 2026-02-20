@@ -584,6 +584,7 @@ export interface ReconciliationSchedulePayment {
   principal: number;
   interest: number;
   penalty: number;
+  payment_type?: string;
 }
 
 export interface ReconciliationScheduleRow {

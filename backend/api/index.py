@@ -436,67 +436,63 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             sch_by_id = {s['id']: s for s in schedule_list}
 
-            sim_remaining = {}
+            # Привязываем каждый платёж к периоду(ам) графика через paid_amount на графике.
+            # Используем реальные данные principal_part/interest_part из loan_payments —
+            # они были рассчитаны в момент внесения на актуальном графике.
+            # Для сопоставления: идём хронологически, каждый платёж закрывает
+            # ближайший незакрытый период(ы) в порядке payment_no.
+            schedule_remaining = {}  # schedule_id -> сколько ещё не покрыто платежами
+            for sch in schedule_list:
+                total_plan = Decimal(str(sch['plan_principal'])) + Decimal(str(sch['plan_interest'])) + Decimal(str(sch['plan_penalty']))
+                schedule_remaining[sch['id']] = total_plan
+
             for pay_row in payment_rows:
                 pay_id, pay_date, pay_amt, pay_pp, pay_ip, pay_pnp, pay_type = pay_row
-                pay_amt_d = Decimal(str(pay_amt))
-                remaining = pay_amt_d
-                pay_distributions = []
+                remaining = Decimal(str(pay_amt))
+                # Распределяем по периодам в порядке payment_no, используя реальную разбивку ОД/% из платежа
+                pay_pp_d = Decimal(str(pay_pp))
+                pay_ip_d = Decimal(str(pay_ip))
+                pay_pnp_d = Decimal(str(pay_pnp))
+                # Сколько ОД/% осталось распределить по периодам
+                pp_left = pay_pp_d
+                ip_left = pay_ip_d
+                pnp_left = pay_pnp_d
 
                 for sch in schedule_list:
-                    if remaining <= Decimal('0'):
+                    if remaining <= Decimal('0.005'):
                         break
                     s_id = sch['id']
-                    sp = Decimal(str(sch['plan_principal']))
-                    si = Decimal(str(sch['plan_interest']))
-                    spn = Decimal(str(sch['plan_penalty']))
-                    already = Decimal(str(sim_remaining.get(s_id, 0)))
-                    total_item = sp + si + spn
-                    need = total_item - already
-                    if need <= Decimal('0'):
+                    need = schedule_remaining.get(s_id, Decimal('0'))
+                    if need <= Decimal('0.005'):
                         continue
+
                     take = min(remaining, need)
                     remaining -= take
-                    sim_remaining[s_id] = float(already + take)
+                    schedule_remaining[s_id] = need - take
 
-                    take_i = min(take, si - min(already, si))
-                    take_after_i = take - take_i
-                    take_pn = min(take_after_i, spn - max(Decimal('0'), min(already - si, spn))) if already < si + spn else Decimal('0')
-                    take_pp = take - take_i - take_pn
+                    # Пропорционально распределяем ОД/% в рамках взятой суммы
+                    ratio = take / Decimal(str(pay_amt)) if Decimal(str(pay_amt)) > 0 else Decimal('1')
+                    take_pp = min(pp_left, (pay_pp_d * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    take_ip = min(ip_left, (pay_ip_d * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    take_pnp = min(pnp_left, (pay_pnp_d * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    # Последняя часть берёт остаток чтобы сумма сошлась
+                    if remaining <= Decimal('0.005'):
+                        take_pp = pp_left
+                        take_ip = ip_left
+                        take_pnp = pnp_left
+                    pp_left -= take_pp
+                    ip_left -= take_ip
+                    pnp_left -= take_pnp
 
-                    pay_distributions.append({
-                        'schedule_id': s_id,
-                        'payment_no': sch['payment_no'],
-                        'plan_date': sch['plan_date'],
+                    sch_by_id[s_id]['payments'].append({
+                        'payment_id': pay_id,
+                        'fact_date': str(pay_date),
                         'amount': round(float(take), 2),
                         'principal': round(float(take_pp), 2),
-                        'interest': round(float(take_i), 2),
-                        'penalty': round(float(take_pn), 2),
+                        'interest': round(float(take_ip), 2),
+                        'penalty': round(float(take_pnp), 2),
+                        'payment_type': pay_type,
                     })
-
-                pay_info = {
-                    'id': pay_id,
-                    'fact_date': str(pay_date),
-                    'amount': float(pay_amt),
-                    'principal_part': float(pay_pp),
-                    'interest_part': float(pay_ip),
-                    'penalty_part': float(pay_pnp),
-                    'payment_type': pay_type,
-                    'distributions': pay_distributions,
-                    'leftover': round(float(remaining), 2),
-                }
-
-                for dist in pay_distributions:
-                    sid = dist['schedule_id']
-                    if sid in sch_by_id:
-                        sch_by_id[sid]['payments'].append({
-                            'payment_id': pay_id,
-                            'fact_date': str(pay_date),
-                            'amount': dist['amount'],
-                            'principal': dist['principal'],
-                            'interest': dist['interest'],
-                            'penalty': dist['penalty'],
-                        })
 
             total_plan = sum(s['plan_total'] for s in schedule_list)
             total_paid = sum(float(r[2]) for r in payment_rows)
