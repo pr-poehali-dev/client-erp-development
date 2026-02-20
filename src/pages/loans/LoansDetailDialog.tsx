@@ -112,8 +112,8 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
               <Button size="sm" variant="outline" onClick={props.onReconciliation}>
                 <Icon name="FileSearch" size={14} className="mr-1" />Сверка платежей
               </Button>
+              {(isAdmin || isManager) && <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>}
               {isAdmin && <>
-                <Button size="sm" variant="outline" onClick={props.onRecalcStatuses}><Icon name="RotateCw" size={14} className="mr-1" />Пересчитать статусы</Button>
                 <Button size="sm" variant="outline" onClick={props.onFixSchedule}><Icon name="Wrench" size={14} className="mr-1" />Исправить дубли</Button>
                 <Button size="sm" variant="outline" onClick={props.onCheckStatus}><Icon name="Bug" size={14} className="mr-1" />Проверить статусы</Button>
                 <Button size="sm" variant="outline" onClick={props.onRebuildSchedule}><Icon name="RefreshCw" size={14} className="mr-1" />Пересоздать график</Button>
