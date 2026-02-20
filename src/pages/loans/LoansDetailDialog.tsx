@@ -47,7 +47,15 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
     { key: "principal_amount", label: "Осн. долг", render: (s: ScheduleItem) => fmt(s.principal_amount) },
     { key: "interest_amount", label: "Проценты", render: (s: ScheduleItem) => fmt(s.interest_amount) },
     { key: "balance_after", label: "Остаток", render: (s: ScheduleItem) => fmt(s.balance_after) },
-    { key: "status", label: "Статус", render: (s: ScheduleItem) => <Badge variant={statusVariant(s.status) as "default"|"destructive"|"secondary"|"warning"} className="text-xs">{statusLabel[s.status] || s.status}</Badge> },
+    { key: "status", label: "Статус", render: (s: ScheduleItem) => {
+      const debt = (s.status === "partial" || s.status === "overdue") ? s.payment_amount - (s.paid_amount ?? 0) : 0;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <Badge variant={statusVariant(s.status) as "default"|"destructive"|"secondary"|"warning"} className="text-xs w-fit">{statusLabel[s.status] || s.status}</Badge>
+          {debt > 0.01 && <span className="text-xs text-red-500 font-medium">−{fmt(debt)}</span>}
+        </div>
+      );
+    }},
   ];
 
   const paymentCols: Column<LoanPayment>[] = [
