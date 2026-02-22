@@ -1075,13 +1075,19 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
 def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes=None):
-    base_rate = Decimal(str(rate))
     rc_list = []
     if rate_changes:
         for rc in rate_changes:
             rc_date = date.fromisoformat(str(rc[0])) if not isinstance(rc[0], date) else rc[0]
-            rc_list.append((rc_date, Decimal(str(rc[1]))))
+            if len(rc) >= 3:
+                rc_list.append((rc_date, Decimal(str(rc[2]))))
+            else:
+                rc_list.append((rc_date, Decimal(str(rc[1]))))
         rc_list.sort(key=lambda x: x[0])
+    if rate_changes and len(rate_changes) > 0 and len(rate_changes[0]) >= 3:
+        base_rate = Decimal(str(rate_changes[0][1]))
+    else:
+        base_rate = Decimal(str(rate))
     schedule = []
     cumulative = Decimal('0')
     bal_changes = []
@@ -1172,7 +1178,7 @@ def recalc_savings_schedule(cur, sid, amount, rate, term, start_date, payout_typ
             initial_amount += tx_amt
     if initial_amount < 0:
         initial_amount = 0
-    cur.execute("SELECT effective_date, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
+    cur.execute("SELECT effective_date, old_rate, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
     rate_changes = cur.fetchall()
     schedule = calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes)
     today = date.today().isoformat()
@@ -1366,9 +1372,10 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             s_bal_current = Decimal(str(sv[1]))
             s_rate = Decimal(str(sv[2]))
             s_start = str(sv[3])
-            cur.execute("SELECT effective_date, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
+            cur.execute("SELECT effective_date, old_rate, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
             rate_changes_rows = cur.fetchall()
-            rate_changes_list = [(date.fromisoformat(str(r[0])), Decimal(str(r[1]))) for r in rate_changes_rows]
+            rate_changes_list = [(date.fromisoformat(str(r[0])), Decimal(str(r[1])), Decimal(str(r[2]))) for r in rate_changes_rows]
+            original_rate = rate_changes_list[0][1] if rate_changes_list else s_rate
 
             s_start_date = date.fromisoformat(s_start)
             d = date.fromisoformat(date_from)
@@ -1411,8 +1418,8 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             while d <= d_to:
                 ds = d.isoformat()
                 if running_bal > 0 and ds not in existing:
-                    effective_rate = s_rate
-                    for rc_d, rc_r in rate_changes_list:
+                    effective_rate = original_rate
+                    for rc_d, rc_old, rc_r in rate_changes_list:
                         if rc_d <= d:
                             effective_rate = rc_r
                     daily_amount = (running_bal * effective_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
