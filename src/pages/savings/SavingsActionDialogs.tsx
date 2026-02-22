@@ -42,8 +42,8 @@ interface SavingsActionDialogsProps {
   
   showBackfill: boolean;
   setShowBackfill: (v: boolean) => void;
-  backfillForm: { date_from: string; date_to: string };
-  setBackfillForm: (v: { date_from: string; date_to: string }) => void;
+  backfillForm: { date_from: string; date_to: string; mode: string };
+  setBackfillForm: (v: { date_from: string; date_to: string; mode: string }) => void;
   handleBackfill: () => void;
   
   showRateChange: boolean;
@@ -123,11 +123,30 @@ const SavingsActionDialogs = (props: SavingsActionDialogsProps) => {
       <Dialog open={props.showBackfill} onOpenChange={props.setShowBackfill}>
         <DialogContent>
           <DialogHeader><DialogTitle>Доначисление процентов</DialogTitle></DialogHeader>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div><Label>С даты (включительно)</Label><Input type="date" value={props.backfillForm.date_from} onChange={e => props.setBackfillForm({ ...props.backfillForm, date_from: e.target.value })} /></div>
             <div><Label>До даты (включительно)</Label><Input type="date" value={props.backfillForm.date_to} onChange={e => props.setBackfillForm({ ...props.backfillForm, date_to: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label>Режим</Label>
+              <div className="grid grid-cols-1 gap-2">
+                <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${props.backfillForm.mode === 'add_missing' ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                  <input type="radio" className="mt-0.5" checked={props.backfillForm.mode === 'add_missing'} onChange={() => props.setBackfillForm({ ...props.backfillForm, mode: 'add_missing' })} />
+                  <div>
+                    <div className="font-medium text-sm">Только добавить пропущенные</div>
+                    <div className="text-xs text-muted-foreground">Начислит проценты за дни, которые ещё не записаны. Существующие начисления не трогает.</div>
+                  </div>
+                </label>
+                <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${props.backfillForm.mode === 'verify_fix' ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                  <input type="radio" className="mt-0.5" checked={props.backfillForm.mode === 'verify_fix'} onChange={() => props.setBackfillForm({ ...props.backfillForm, mode: 'verify_fix' })} />
+                  <div>
+                    <div className="font-medium text-sm">Проверить и исправить всё</div>
+                    <div className="text-xs text-muted-foreground">Пересчитает каждый день по правильным ставкам из истории изменений, исправит ошибочные суммы и добавит пропущенные.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
           </div>
-          <DialogFooter><Button onClick={props.handleBackfill} disabled={saving}>Доначислить</Button></DialogFooter>
+          <DialogFooter><Button onClick={props.handleBackfill} disabled={saving}>Запустить</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

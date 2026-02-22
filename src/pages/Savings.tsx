@@ -61,7 +61,7 @@ const Savings = () => {
   const [modifyTermForm, setModifyTermForm] = useState({ new_term: "", effective_date: new Date().toISOString().slice(0, 10) });
   const [txFilterState, setTxFilterState] = useState<"all" | "transactions" | "accruals">("all");
   const [showBackfill, setShowBackfill] = useState(false);
-  const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10) });
+  const [backfillForm, setBackfillForm] = useState({ date_from: "", date_to: new Date().toISOString().slice(0, 10), mode: "add_missing" });
   const [showRateChange, setShowRateChange] = useState(false);
   const [rateChangeForm, setRateChangeForm] = useState({ new_rate: "", effective_date: new Date().toISOString().slice(0, 10), reason: "" });
 
@@ -199,9 +199,16 @@ const Savings = () => {
     setSaving(true);
     try {
       const res = await api.savings.backfillAccrue({
-        saving_id: detail.id, date_from: backfillForm.date_from, date_to: backfillForm.date_to,
+        saving_id: detail.id,
+        date_from: backfillForm.date_from,
+        date_to: backfillForm.date_to,
+        mode: backfillForm.mode,
       });
-      toast({ title: "Проценты доначислены", description: `Дней: ${res.days_accrued}, Сумма: ${fmt(res.total_amount)}` });
+      const parts: string[] = [];
+      if (res.days_added > 0) parts.push(`Добавлено: ${res.days_added} дн. на ${fmt(res.total_added)}`);
+      if (res.days_fixed > 0) parts.push(`Исправлено: ${res.days_fixed} дн., корректировка ${fmt(res.total_fixed_diff)}`);
+      if (parts.length === 0) parts.push("Нет изменений — все начисления актуальны");
+      toast({ title: "Готово", description: parts.join(" / ") });
       setShowBackfill(false);
       await refreshDetail();
     } catch (e) {
