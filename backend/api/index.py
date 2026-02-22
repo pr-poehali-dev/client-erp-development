@@ -8,6 +8,8 @@ import base64
 import hashlib
 import secrets
 from io import BytesIO
+import urllib.request
+import urllib.parse
 
 def get_conn():
     return psycopg2.connect(os.environ['DATABASE_URL'])
@@ -2921,6 +2923,29 @@ def hash_password(pw):
 def generate_sms_code():
     return '%06d' % (secrets.randbelow(900000) + 100000)
 
+def send_smsaero(phone, text):
+    email = os.environ.get('SMSAERO_EMAIL', '')
+    api_key = os.environ.get('SMSAERO_API_KEY', '')
+    if not email or not api_key:
+        return False, 'SMS-сервис не настроен'
+    clean = ''.join(c for c in phone if c.isdigit())
+    if len(clean) == 11 and clean[0] == '8':
+        clean = '7' + clean[1:]
+    if not clean.startswith('7') or len(clean) != 11:
+        return False, 'Неверный формат номера телефона'
+    params = urllib.parse.urlencode({'number': clean, 'text': text, 'sign': 'SMS Aero', 'channel': 'DIRECT'})
+    url = 'https://gate.smsaero.ru/v2/sms/send?' + params
+    credentials = base64.b64encode(f'{email}:{api_key}'.encode()).decode()
+    req = urllib.request.Request(url, headers={'Authorization': f'Basic {credentials}', 'Accept': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get('success'):
+                return True, None
+            return False, data.get('message', 'Ошибка отправки SMS')
+    except Exception as e:
+        return False, str(e)
+
 def generate_token():
     return secrets.token_hex(32)
 
@@ -3148,7 +3173,10 @@ def handle_auth(method, body, cur, conn):
             has_password = False
 
         conn.commit()
-        return {'success': True, 'has_password': has_password, 'sms_sent': True, 'debug_code': code}
+        sms_ok, sms_err = send_smsaero(phone, f'Ваш код для входа в личный кабинет: {code}')
+        if not sms_ok:
+            return {'error': f'Не удалось отправить SMS: {sms_err}'}
+        return {'success': True, 'has_password': has_password, 'sms_sent': True}
 
     elif action == 'verify_sms':
         phone = body.get('phone', '').strip()
