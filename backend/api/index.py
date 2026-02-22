@@ -1634,9 +1634,34 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 cur.execute("UPDATE savings SET current_balance=current_balance+%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), sid))
             elif old_tt == 'interest_payout':
                 cur.execute("UPDATE savings SET paid_interest=paid_interest-%s, accrued_interest=accrued_interest-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), float(old_amount), sid))
+            elif old_tt == 'interest_accrual':
+                cur.execute("UPDATE savings SET accrued_interest=accrued_interest-%s, updated_at=NOW() WHERE id=%s" % (float(old_amount), sid))
             audit_log(cur, staff, 'delete_transaction', 'saving', sid, '', 'Удалена: %s %s' % (old_tt, float(old_amount)), ip)
             conn.commit()
             return {'success': True}
+
+        elif action == 'delete_accrual':
+            accrual_id = int(body['accrual_id'])
+            cur.execute("SELECT saving_id, daily_amount FROM savings_daily_accruals WHERE id=%s" % accrual_id)
+            row = cur.fetchone()
+            if not row:
+                return {'error': 'Начисление не найдено'}
+            sid, daily_amt = row[0], Decimal(str(row[1]))
+            cur.execute("DELETE FROM savings_daily_accruals WHERE id=%s" % accrual_id)
+            cur.execute("UPDATE savings SET accrued_interest=GREATEST(0, accrued_interest-%s), updated_at=NOW() WHERE id=%s" % (float(daily_amt), sid))
+            audit_log(cur, staff, 'delete_accrual', 'saving', sid, '', 'Удалено начисление %s' % float(daily_amt), ip)
+            conn.commit()
+            return {'success': True}
+
+        elif action == 'clear_daily_accruals':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT COALESCE(SUM(daily_amount),0) FROM savings_daily_accruals WHERE saving_id=%s" % sid)
+            total_accrued = Decimal(str(cur.fetchone()[0]))
+            cur.execute("DELETE FROM savings_daily_accruals WHERE saving_id=%s" % sid)
+            cur.execute("UPDATE savings SET accrued_interest=0, updated_at=NOW() WHERE id=%s" % sid)
+            audit_log(cur, staff, 'clear_daily_accruals', 'saving', sid, '', 'Удалены все начисления, сумма: %s' % float(total_accrued), ip)
+            conn.commit()
+            return {'success': True, 'cleared_amount': float(total_accrued)}
 
         elif action == 'delete_contract':
             sid = int(body['saving_id'])
@@ -1659,6 +1684,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             if not sr:
                 return {'error': 'Договор не найден'}
             cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings_daily_accruals WHERE saving_id=%s" % sid)
             cur.execute("DELETE FROM savings_rate_changes WHERE saving_id=%s" % sid)
             cur.execute("UPDATE savings_schedule SET status='pending', paid_date=NULL, paid_amount=0 WHERE saving_id=%s" % sid)
             orig = float(sr[0])

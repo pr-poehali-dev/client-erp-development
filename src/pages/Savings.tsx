@@ -218,6 +218,31 @@ const Savings = () => {
     }
   };
 
+  const handleDeleteAccrual = async (accrualId: number) => {
+    if (!detail) return;
+    try {
+      await api.savings.deleteAccrual(accrualId);
+      toast({ title: "Начисление удалено" });
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
+
+  const handleClearAccruals = async () => {
+    if (!detail || !confirm("Удалить все начисления по этому договору? Сумма начисленных процентов обнулится.")) return;
+    setSaving(true);
+    try {
+      const res = await api.savings.clearDailyAccruals(detail.id);
+      toast({ title: "Начисления очищены", description: `Удалено: ${fmt(res.cleared_amount)}` });
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleRateChange = async () => {
     if (!detail || !rateChangeForm.new_rate) return;
     setSaving(true);
@@ -348,6 +373,8 @@ const Savings = () => {
         onDeleteTx={handleDeleteTx}
         onEditTx={openEditTx}
         onDeleteContract={handleDeleteContract}
+        onDeleteAccrual={handleDeleteAccrual}
+        onClearAccruals={handleClearAccruals}
       />
 
       <SavingsActionDialogs

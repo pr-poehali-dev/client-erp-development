@@ -29,6 +29,8 @@ interface SavingsDetailDialogProps {
   onDeleteTx: (id: number) => void;
   onEditTx: (tx: SavingTransaction) => void;
   onDeleteContract: () => void;
+  onDeleteAccrual: (id: number) => void;
+  onClearAccruals: () => void;
 }
 
 const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
@@ -54,6 +56,9 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
     { key: "balance", label: "Баланс", render: (a: DailyAccrual) => fmt(a.balance) },
     { key: "rate", label: "Ставка", render: (a: DailyAccrual) => a.rate + "%" },
     { key: "daily_amount", label: "Сумма", render: (a: DailyAccrual) => fmt(a.daily_amount) },
+    { key: "id", label: "", render: (a: DailyAccrual) => isAdmin ? (
+      <button onClick={(e) => { e.stopPropagation(); props.onDeleteAccrual(a.id); }} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>
+    ) : null },
   ];
 
   const schCols: Column<SavingsScheduleItem>[] = [
@@ -116,10 +121,17 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
           </TabsList>
 
           <TabsContent value="transactions">
-            <div className="mb-2 flex gap-2">
-              <Button size="sm" variant={txFilterState === "all" ? "default" : "outline"} onClick={() => setTxFilterState("all")}>Все</Button>
-              <Button size="sm" variant={txFilterState === "transactions" ? "default" : "outline"} onClick={() => setTxFilterState("transactions")}>Транзакции</Button>
-              <Button size="sm" variant={txFilterState === "accruals" ? "default" : "outline"} onClick={() => setTxFilterState("accruals")}>Начисления</Button>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex gap-2">
+                <Button size="sm" variant={txFilterState === "all" ? "default" : "outline"} onClick={() => setTxFilterState("all")}>Все</Button>
+                <Button size="sm" variant={txFilterState === "transactions" ? "default" : "outline"} onClick={() => setTxFilterState("transactions")}>Транзакции</Button>
+                <Button size="sm" variant={txFilterState === "accruals" ? "default" : "outline"} onClick={() => setTxFilterState("accruals")}>Начисления ({detail.daily_accruals?.length ?? 0})</Button>
+              </div>
+              {isAdmin && txFilterState === "accruals" && (detail.daily_accruals?.length ?? 0) > 0 && (
+                <Button size="sm" variant="destructive" onClick={props.onClearAccruals}>
+                  <Icon name="Trash2" size={14} className="mr-1" />Очистить все начисления
+                </Button>
+              )}
             </div>
             {txFilterState === "accruals" ? (
               <DataTable columns={accrCols} data={visibleAccruals} />
