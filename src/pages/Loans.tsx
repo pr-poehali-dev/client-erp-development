@@ -7,6 +7,7 @@ import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { toNum, Loan, LoanDetail, LoanPayment, Member, ScheduleItem, Organization } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
@@ -47,6 +48,8 @@ const Loans = () => {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterOrg, setFilterOrg] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [detail, setDetail] = useState<LoanDetail | null>(null);
@@ -79,7 +82,12 @@ const Loans = () => {
   };
   useEffect(() => { load(); }, []);
 
-  const filtered = loans.filter(l => l.contract_no?.toLowerCase().includes(search.toLowerCase()) || l.member_name?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = loans.filter(l => {
+    const matchSearch = l.contract_no?.toLowerCase().includes(search.toLowerCase()) || l.member_name?.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = filterStatus === "all" || l.status === filterStatus;
+    const matchOrg = filterOrg === "all" || String(l.org_id) === filterOrg || (filterOrg === "none" && !l.org_id);
+    return matchSearch && matchStatus && matchOrg;
+  });
 
   const handleCreate = async () => {
     setSaving(true);
@@ -357,7 +365,38 @@ const Loans = () => {
         title="Займы"
         action={isAdmin || isManager ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
       >
-        <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
+        <div className="flex flex-wrap gap-2">
+          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Статус" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все статусы</SelectItem>
+              <SelectItem value="active">Активен</SelectItem>
+              <SelectItem value="overdue">Просрочен</SelectItem>
+              <SelectItem value="closed">Закрыт</SelectItem>
+              <SelectItem value="paid">Оплачен</SelectItem>
+              <SelectItem value="partial">Частично оплачен</SelectItem>
+            </SelectContent>
+          </Select>
+          {orgs.length > 0 && (
+            <Select value={filterOrg} onValueChange={setFilterOrg}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Организация" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все организации</SelectItem>
+                {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {(filterStatus !== "all" || filterOrg !== "all") && (
+            <button onClick={() => { setFilterStatus("all"); setFilterOrg("all"); }} className="px-3 py-1 text-sm border rounded hover:bg-muted text-muted-foreground">
+              Сбросить
+            </button>
+          )}
+        </div>
       </PageHeader>
 
       <DataTable columns={columns} data={filtered} loading={loading} onRowClick={openDetail} />

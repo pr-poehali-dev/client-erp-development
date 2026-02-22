@@ -7,6 +7,7 @@ import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import api, { toNum, Saving, SavingDetail, SavingTransaction, Member, Organization } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import SavingsCreateDialog from "./savings/SavingsCreateDialog";
 import SavingsDetailDialog from "./savings/SavingsDetailDialog";
 import SavingsActionDialogs from "./savings/SavingsActionDialogs";
@@ -40,6 +41,8 @@ const Savings = () => {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterOrg, setFilterOrg] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
@@ -74,7 +77,12 @@ const Savings = () => {
   };
   useEffect(() => { load(); }, []);
 
-  const filtered = items.filter(s => s.contract_no?.toLowerCase().includes(search.toLowerCase()) || s.member_name?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = items.filter(s => {
+    const matchSearch = s.contract_no?.toLowerCase().includes(search.toLowerCase()) || s.member_name?.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = filterStatus === "all" || s.status === filterStatus;
+    const matchOrg = filterOrg === "all" || String(s.org_id) === filterOrg || (filterOrg === "none" && !s.org_id);
+    return matchSearch && matchStatus && matchOrg;
+  });
 
   const handleCreate = async () => {
     setSaving(true);
@@ -332,8 +340,35 @@ const Savings = () => {
         title="Сбережения"
         action={isAdmin || isManager ? { label: "Новый договор", onClick: () => setShowForm(true) } : undefined}
       >
-        <div className="flex gap-2">
-          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
+        <div className="flex flex-wrap gap-2">
+          <Input placeholder="Поиск по договору, пайщику..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-xs" />
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Статус" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все статусы</SelectItem>
+              <SelectItem value="active">Активен</SelectItem>
+              <SelectItem value="early_closed">Досрочно закрыт</SelectItem>
+              <SelectItem value="closed">Закрыт</SelectItem>
+            </SelectContent>
+          </Select>
+          {orgs.length > 0 && (
+            <Select value={filterOrg} onValueChange={setFilterOrg}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Организация" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все организации</SelectItem>
+                {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {(filterStatus !== "all" || filterOrg !== "all") && (
+            <button onClick={() => { setFilterStatus("all"); setFilterOrg("all"); }} className="px-3 py-1 text-sm border rounded hover:bg-muted text-muted-foreground">
+              Сбросить
+            </button>
+          )}
           {isAdmin && (
             <button onClick={handleRecalcAll} disabled={saving} className="px-3 py-1 text-sm border rounded hover:bg-muted" title="Пересчитать все графики">
               <Icon name="RefreshCw" size={16} />
