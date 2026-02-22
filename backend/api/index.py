@@ -1527,7 +1527,8 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             old_rate = float(sv[0])
             if new_rate == old_rate:
                 return {'error': 'Новая ставка совпадает с текущей'}
-            cur.execute("INSERT INTO savings_rate_changes (saving_id, effective_date, old_rate, new_rate, reason, created_by) VALUES (%s, '%s', %s, %s, '%s', %s)" % (sid, effective_date, old_rate, new_rate, esc(reason), staff))
+            created_by_id = staff.get('user_id') if staff else None
+            cur.execute("INSERT INTO savings_rate_changes (saving_id, effective_date, old_rate, new_rate, reason, created_by) VALUES (%s, '%s', %s, %s, '%s', %s)" % (sid, effective_date, old_rate, new_rate, esc(reason), created_by_id or 'NULL'))
             cur.execute("UPDATE savings SET rate=%s, updated_at=NOW() WHERE id=%s" % (new_rate, sid))
             s_amount, s_term = float(sv[1]), int(sv[2])
             s_start, s_pt = date.fromisoformat(str(sv[3])), sv[4]
