@@ -215,24 +215,27 @@ def recalc_loan_schedule_statuses(cur, lid):
 
             # Берём ровно столько сколько нужно для закрытия периода.
             # Если денег меньше чем нужно — частичное покрытие.
-            # Если денег больше — берём только need_total, остаток пойдёт в ОД.
+            # Если денег больше need_total — берём только need_total, остаток НЕ перетекает на следующие периоды.
             take_total = min(remaining, need_total)
             item_i = min(take_total, need_i)
             after_i = take_total - item_i
             item_pn = min(after_i, need_pn)
             item_pp = after_i - item_pn
             remaining -= take_total
-            
+
             pay_ip += item_i
             pay_pnp += item_pn
             pay_pp += item_pp
-            
+
             total_item = sp + si + spn
             new_paid = spa + item_i + item_pn + item_pp
-            ns = 'paid' if new_paid >= total_item else 'partial'
+            ns = 'paid' if new_paid >= total_item - Decimal('0.005') else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
 
-            # Остаток платежа переходит на следующие периоды в цикле
+            # Если этот период закрыт (paid) — остаток НЕ переходит дальше (переплата остаётся в этом периоде)
+            if ns == 'paid':
+                remaining = Decimal('0')
+                break
         
         cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
             float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
