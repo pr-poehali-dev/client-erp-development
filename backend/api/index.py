@@ -174,7 +174,7 @@ def refresh_loan_overdue_status(cur, lid):
     """ % lid)
 
 def recalc_loan_schedule_statuses(cur, lid):
-    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending' WHERE loan_id=%s" % lid)
+    cur.execute("UPDATE loan_schedule SET paid_amount=0, paid_date=NULL, status='pending', payment_id=NULL WHERE loan_id=%s" % lid)
     cur.execute("SELECT id, payment_date, amount FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id" % lid)
     payments = cur.fetchall()
     for pay in payments:
@@ -213,9 +213,6 @@ def recalc_loan_schedule_statuses(cur, lid):
             if need_total <= Decimal('0.005'):
                 continue
 
-            # Берём ровно столько сколько нужно для закрытия периода.
-            # Если денег меньше чем нужно — частичное покрытие.
-            # Если денег больше — берём только need_total, остаток пойдёт в следующие периоды (погашение ОД).
             take_total = min(remaining, need_total)
             item_i = min(take_total, need_i)
             after_i = take_total - item_i
@@ -230,9 +227,8 @@ def recalc_loan_schedule_statuses(cur, lid):
             total_item = sp + si + spn
             new_paid = spa + item_i + item_pn + item_pp
             ns = 'paid' if new_paid >= total_item else 'partial'
-            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
-
-            # Остаток продолжает закрывать следующие периоды (% и ОД) в цикле.
+            # Записываем payment_id — явная ссылка на платёж, закрывший этот период
+            cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
 
         # После закрытия всех периодов — остаток идёт в досрочное погашение ОД
         if remaining > Decimal('0.005'):
@@ -424,24 +420,45 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             nr = cur.fetchone()
             loan['member_name'] = nr[0] if nr else ''
 
+            # Отчёт читает данные напрямую из БД без собственных расчётов.
+            # Каждый период получает платёж через payment_id (проставляется при внесении платежа и recalc).
             cur.execute("""
-                SELECT id, payment_no, payment_date, payment_amount, principal_amount, interest_amount,
-                       COALESCE(penalty_amount,0) as penalty_amount, COALESCE(paid_amount,0) as paid_amount,
-                       status, paid_date
-                FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no, id
+                SELECT ls.id, ls.payment_no, ls.payment_date, ls.payment_amount,
+                       ls.principal_amount, ls.interest_amount,
+                       COALESCE(ls.penalty_amount,0) as penalty_amount,
+                       COALESCE(ls.paid_amount,0) as paid_amount,
+                       ls.status, ls.paid_date, ls.payment_id,
+                       lp.amount as pay_amount,
+                       lp.principal_part, lp.interest_part,
+                       COALESCE(lp.penalty_part,0) as penalty_part,
+                       lp.payment_type, lp.payment_date as pay_fact_date
+                FROM loan_schedule ls
+                LEFT JOIN loan_payments lp ON lp.id = ls.payment_id
+                WHERE ls.loan_id=%s
+                ORDER BY ls.payment_no, ls.id
             """ % lid)
             schedule_rows = cur.fetchall()
 
-            cur.execute("""
-                SELECT id, payment_date, amount, principal_part, interest_part, COALESCE(penalty_part,0) as penalty_part, payment_type
-                FROM loan_payments WHERE loan_id=%s ORDER BY payment_date, id
-            """ % lid)
-            payment_rows = cur.fetchall()
+            cur.execute("SELECT COALESCE(SUM(amount),0) FROM loan_payments WHERE loan_id=%s" % lid)
+            total_paid_row = cur.fetchone()
 
             schedule_list = []
             for r in schedule_rows:
-                sch_id, pno, pdate, pamt, princ, inter, penal, paid, status, paid_date = r
-                total = float(Decimal(str(princ)) + Decimal(str(inter)) + Decimal(str(penal)))
+                (sch_id, pno, pdate, pamt, princ, inter, penal, paid, status, paid_date,
+                 pay_id, pay_amt, pay_pp, pay_ip, pay_pnp, pay_type, pay_fact_date) = r
+                plan_total = float(Decimal(str(princ)) + Decimal(str(inter)) + Decimal(str(penal)))
+                payments = []
+                if pay_id and paid > 0:
+                    payments.append({
+                        'payment_id': pay_id,
+                        'fact_date': str(pay_fact_date) if pay_fact_date else str(paid_date),
+                        'amount': float(paid),
+                        'fact_amount': float(pay_amt) if pay_amt else float(paid),
+                        'principal': float(pay_pp) if pay_pp else 0.0,
+                        'interest': float(pay_ip) if pay_ip else 0.0,
+                        'penalty': float(pay_pnp) if pay_pnp else 0.0,
+                        'payment_type': pay_type or 'regular',
+                    })
                 schedule_list.append({
                     'id': sch_id,
                     'payment_no': pno,
@@ -450,112 +467,15 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     'plan_principal': float(princ),
                     'plan_interest': float(inter),
                     'plan_penalty': float(penal),
-                    'plan_total': round(total, 2),
+                    'plan_total': round(plan_total, 2),
                     'paid_amount': float(paid),
                     'status': status,
                     'paid_date': str(paid_date) if paid_date else None,
-                    'payments': []
+                    'payments': payments,
                 })
-
-            # Привязываем платежи к периодам используя единую логику:
-            # каждый платёж последовательно закрывает периоды по схеме % -> штраф -> ОД.
-            # Остаток после закрытия всех периодов — досрочное погашение ОД последнего закрытого периода.
-            # Эта логика идентична recalc_loan_schedule_statuses и внесению платежа.
-
-            # Строим список периодов с need_* для каждого (сколько ещё нужно внести)
-            sch_needs = []
-            for sch in schedule_list:
-                sp = Decimal(str(sch['plan_principal']))
-                si = Decimal(str(sch['plan_interest']))
-                spn = Decimal(str(sch['plan_penalty']))
-                paid = Decimal(str(sch['paid_amount']))
-                already_i = min(paid, si)
-                already_pn = min(paid - si, spn) if paid > si else Decimal('0')
-                already_pp = paid - already_i - already_pn if paid > already_i + already_pn else Decimal('0')
-                sch_needs.append({
-                    'sch': sch,
-                    'need_i': si - already_i,
-                    'need_pn': spn - already_pn,
-                    'need_pp': sp - already_pp,
-                    'paid_so_far': Decimal('0'),  # накопленное в этом проходе
-                })
-
-            sch_idx = 0
-            for pay_row in payment_rows:
-                pay_id, pay_date, pay_amt, pay_pp_d, pay_ip_d, pay_pnp_d, pay_type = pay_row
-                remaining = Decimal(str(pay_amt))
-                pay_total = Decimal(str(pay_amt))
-
-                i = sch_idx
-                while remaining > Decimal('0.005') and i < len(sch_needs):
-                    sn = sch_needs[i]
-                    need_i = sn['need_i']
-                    need_pn = sn['need_pn']
-                    need_pp = sn['need_pp']
-                    need_total = need_i + need_pn + need_pp
-
-                    if need_total <= Decimal('0.005'):
-                        i += 1
-                        if i > sch_idx:
-                            sch_idx = i
-                        continue
-
-                    take_total = min(remaining, need_total)
-                    item_i = min(take_total, need_i)
-                    after_i = take_total - item_i
-                    item_pn = min(after_i, need_pn)
-                    item_pp = after_i - item_pn
-                    remaining -= take_total
-
-                    sn['need_i'] -= item_i
-                    sn['need_pn'] -= item_pn
-                    sn['need_pp'] -= item_pp
-                    sn['paid_so_far'] += take_total
-
-                    sn['sch']['payments'].append({
-                        'payment_id': pay_id,
-                        'fact_date': str(pay_date),
-                        'amount': round(float(take_total), 2),
-                        'fact_amount': round(float(pay_total), 2),
-                        'principal': round(float(item_pp), 2),
-                        'interest': round(float(item_i), 2),
-                        'penalty': round(float(item_pn), 2),
-                        'pay_principal': round(float(pay_pp_d), 2),
-                        'pay_interest': round(float(pay_ip_d), 2),
-                        'pay_penalty': round(float(pay_pnp_d), 2),
-                        'payment_type': pay_type,
-                    })
-
-                    # Период полностью закрыт — переходим к следующему
-                    if sn['need_i'] + sn['need_pn'] + sn['need_pp'] <= Decimal('0.005'):
-                        i += 1
-                        sch_idx = i
-
-                # Остаток после всех периодов — досрочное погашение ОД, добавляем к последнему закрытому периоду
-                if remaining > Decimal('0.005') and sch_idx > 0:
-                    last_sn = sch_needs[sch_idx - 1]
-                    if last_sn['sch']['payments']:
-                        last_entry = last_sn['sch']['payments'][-1]
-                        if last_entry['payment_id'] == pay_id:
-                            last_entry['amount'] = round(last_entry['amount'] + float(remaining), 2)
-                            last_entry['principal'] = round(last_entry['principal'] + float(remaining), 2)
-                        else:
-                            last_sn['sch']['payments'].append({
-                                'payment_id': pay_id,
-                                'fact_date': str(pay_date),
-                                'amount': round(float(remaining), 2),
-                                'fact_amount': round(float(pay_total), 2),
-                                'principal': round(float(remaining), 2),
-                                'interest': 0.0,
-                                'penalty': 0.0,
-                                'pay_principal': round(float(pay_pp_d), 2),
-                                'pay_interest': round(float(pay_ip_d), 2),
-                                'pay_penalty': round(float(pay_pnp_d), 2),
-                                'payment_type': pay_type,
-                            })
 
             total_plan = sum(s['plan_total'] for s in schedule_list)
-            total_paid = sum(float(r[2]) for r in payment_rows)
+            total_paid = float(total_paid_row[0]) if total_paid_row else 0.0
             total_overdue = sum(s['plan_total'] - s['paid_amount'] for s in schedule_list if s['status'] in ('overdue', 'partial') and s['plan_date'] < date.today().isoformat())
 
             return {
@@ -761,10 +681,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     total_item = sp + si + spn
                     new_paid = spa + item_i + item_pn + item_pp
                     ns = 'paid' if new_paid >= total_item else 'partial'
+                    # payment_id будет проставлен после INSERT платежа
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
-
-                    # Остаток продолжает закрывать следующие периоды (% и ОД) в цикле.
-                    # После того как все периоды закрыты — оставшийся остаток пойдёт в досрочное погашение ОД.
 
                 # После закрытия всех периодов — остаток идёт в досрочное погашение ОД
                 if remaining_amt > Decimal('0.005'):
@@ -775,8 +693,11 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
 
             cur.execute("""
                 INSERT INTO loan_payments (loan_id, payment_date, amount, principal_part, interest_part, penalty_part, payment_type)
-                VALUES (%s, '%s', %s, %s, %s, %s, 'regular')
+                VALUES (%s, '%s', %s, %s, %s, %s, 'regular') RETURNING id
             """ % (lid, pd, float(amt), float(pp), float(i_p), float(pnp)))
+            new_pay_id = cur.fetchone()[0]
+            # Проставляем payment_id во все периоды, закрытые этим платежом
+            cur.execute("UPDATE loan_schedule SET payment_id=%s WHERE loan_id=%s AND paid_date='%s' AND payment_id IS NULL AND status IN ('paid','partial')" % (new_pay_id, lid, pd))
 
             nb = loan_bal - pp
             if nb < 0: nb = Decimal('0')
