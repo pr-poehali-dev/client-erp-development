@@ -185,11 +185,14 @@ def recalc_loan_schedule_statuses(cur, lid):
         pay_ip = Decimal('0')
         pay_pnp = Decimal('0')
         
+        # Берём только периоды с плановой датой <= дата платежа.
+        # Будущие периоды не трогаем — переплата пойдёт в ОД с пересчётом графика.
         cur.execute("""
             SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
             FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
+            AND payment_date <= '%s'
             ORDER BY payment_no, id
-        """ % lid)
+        """ % (lid, pay_date))
         unpaid_rows = cur.fetchall()
         
         for row in unpaid_rows:
@@ -639,11 +642,14 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             remaining_amt = amt
 
             if first_row:
+                # Берём только периоды с плановой датой <= дата платежа.
+                # Будущие периоды не трогаем — переплата пойдёт в ОД с пересчётом графика.
                 cur.execute("""
                     SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
                     FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+                    AND payment_date <= '%s'
                     ORDER BY payment_no, id
-                """ % lid)
+                """ % (lid, pd))
                 unpaid_rows = cur.fetchall()
                 
                 for row in unpaid_rows:
