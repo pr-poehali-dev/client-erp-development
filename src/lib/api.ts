@@ -101,6 +101,8 @@ export const api = {
       request<{ success: boolean; days_added: number; days_fixed: number; total_added: number; total_fixed_diff: number; date_from: string; date_to: string; mode: string }>("POST", undefined, { entity: "savings", action: "backfill_accrue", ...data }),
     recalcSchedule: (savingId: number) =>
       request<{ success: boolean; new_end_date: string }>("POST", undefined, { entity: "savings", action: "recalc_schedule", saving_id: savingId }),
+    update: (data: { saving_id: number; contract_no?: string; member_id?: number; amount?: number; rate?: number; term_months?: number; payout_type?: string; start_date?: string; min_balance_pct?: number; org_id?: number | null }) =>
+      request<{ success: boolean; schedule: SavingsScheduleItem[]; new_end_date: string }>("POST", undefined, { entity: "savings", action: "update_saving", ...data }),
     changeRate: (data: { saving_id: number; new_rate: number; effective_date?: string; reason?: string }) =>
       request<{ success: boolean; old_rate: number; new_rate: number }>("POST", undefined, { entity: "savings", action: "change_rate", ...data }),
     updateTransaction: (data: { transaction_id: number; amount?: number; transaction_date?: string; description?: string }) =>

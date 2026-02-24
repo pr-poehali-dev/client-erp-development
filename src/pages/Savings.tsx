@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import SavingsCreateDialog from "./savings/SavingsCreateDialog";
 import SavingsDetailDialog from "./savings/SavingsDetailDialog";
 import SavingsActionDialogs from "./savings/SavingsActionDialogs";
+import SavingsEditDialog from "./savings/SavingsEditDialog";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -69,6 +70,8 @@ const Savings = () => {
   const [rateChangeForm, setRateChangeForm] = useState({ new_rate: "", effective_date: new Date().toISOString().slice(0, 10), reason: "" });
 
   const [form, setForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: new Date().toISOString().slice(0, 10), min_balance_pct: "", org_id: "" });
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ contract_no: "", member_id: "", amount: "", rate: "", term_months: "", payout_type: "monthly", start_date: "", min_balance_pct: "", org_id: "" });
 
   const load = () => {
     setLoading(true);
@@ -321,6 +324,48 @@ const Savings = () => {
     }
   };
 
+  const openEditSaving = () => {
+    if (!detail) return;
+    setEditForm({
+      contract_no: detail.contract_no,
+      member_id: String(detail.member_id),
+      amount: String(detail.amount),
+      rate: String(detail.rate),
+      term_months: String(detail.term_months),
+      payout_type: detail.payout_type,
+      start_date: detail.start_date,
+      min_balance_pct: String(detail.min_balance_pct || 0),
+      org_id: detail.org_id ? String(detail.org_id) : "",
+    });
+    setShowEdit(true);
+  };
+
+  const handleEditSaving = async () => {
+    if (!detail) return;
+    setSaving(true);
+    try {
+      await api.savings.update({
+        saving_id: detail.id,
+        contract_no: editForm.contract_no,
+        member_id: Number(editForm.member_id),
+        amount: toNum(editForm.amount),
+        rate: toNum(editForm.rate),
+        term_months: toNum(editForm.term_months),
+        payout_type: editForm.payout_type,
+        start_date: editForm.start_date,
+        min_balance_pct: editForm.min_balance_pct ? toNum(editForm.min_balance_pct) : 0,
+        org_id: editForm.org_id ? Number(editForm.org_id) : null,
+      });
+      toast({ title: "Договор обновлён", description: "График пересчитан" });
+      setShowEdit(false);
+      await refreshDetail();
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteContract = async () => {
     if (!detail || !confirm(`Удалить договор сбережений ${detail.contract_no}? Все связанные данные будут удалены.`)) return;
     try {
@@ -410,6 +455,18 @@ const Savings = () => {
         onDeleteContract={handleDeleteContract}
         onDeleteAccrual={handleDeleteAccrual}
         onClearAccruals={handleClearAccruals}
+        onEdit={openEditSaving}
+      />
+
+      <SavingsEditDialog
+        open={showEdit}
+        onOpenChange={setShowEdit}
+        form={editForm}
+        setForm={setEditForm}
+        members={members}
+        orgs={orgs}
+        saving={saving}
+        onSave={handleEditSaving}
       />
 
       <SavingsActionDialogs

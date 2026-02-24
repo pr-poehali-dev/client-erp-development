@@ -1561,6 +1561,58 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'recalculated': recalculated, 'total': len(active_savings), 'errors': errors}
 
+        elif action == 'update_saving':
+            sid = int(body['saving_id'])
+            cur.execute("SELECT id, contract_no, member_id, amount, rate, term_months, payout_type, start_date, min_balance_pct, org_id, status FROM savings WHERE id=%s" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Договор не найден'}
+            old_cn = sv[1]
+            old_amount = float(sv[3])
+            old_rate = float(sv[4])
+            old_term = int(sv[5])
+            old_pt = sv[6]
+            old_sd = date.fromisoformat(str(sv[7]))
+            old_mbp = float(sv[8]) if sv[8] else 0
+            old_org = sv[9]
+            old_status = sv[10]
+            cn = body.get('contract_no', old_cn).strip()
+            if cn != old_cn:
+                cur.execute("SELECT id FROM savings WHERE contract_no='%s' AND id!=%s" % (esc(cn), sid))
+                if cur.fetchone():
+                    return {'error': 'Договор с номером %s уже существует' % cn}
+            new_amount = safe_float(body['amount'], 'сумма') if 'amount' in body else old_amount
+            new_rate = safe_float(body['rate'], 'ставка') if 'rate' in body else old_rate
+            new_term = safe_int(body['term_months'], 'срок') if 'term_months' in body else old_term
+            new_pt = body.get('payout_type', old_pt)
+            new_sd = date.fromisoformat(body['start_date']) if 'start_date' in body else old_sd
+            new_mbp = safe_float(body.get('min_balance_pct', old_mbp), 'мин. остаток %')
+            new_org = body.get('org_id', old_org)
+            new_mid = int(body['member_id']) if 'member_id' in body else int(sv[2])
+            new_ed = add_months(new_sd, new_term)
+            cur.execute("UPDATE savings SET contract_no='%s', member_id=%s, amount=%s, rate=%s, term_months=%s, payout_type='%s', start_date='%s', end_date='%s', min_balance_pct=%s, org_id=%s, updated_at=NOW() WHERE id=%s" % (esc(cn), new_mid, new_amount, new_rate, new_term, new_pt, new_sd.isoformat(), new_ed.isoformat(), new_mbp, new_org if new_org else 'NULL', sid))
+            if old_status == 'active':
+                cur.execute("UPDATE savings SET current_balance=%s WHERE id=%s AND current_balance=%s" % (new_amount, sid, old_amount))
+            changes = []
+            if cn != old_cn:
+                changes.append('номер: %s→%s' % (old_cn, cn))
+            if new_amount != old_amount:
+                changes.append('сумма: %s→%s' % (fmt_money(old_amount), fmt_money(new_amount)))
+            if new_rate != old_rate:
+                changes.append('ставка: %s%%→%s%%' % (old_rate, new_rate))
+            if new_term != old_term:
+                changes.append('срок: %s→%s мес.' % (old_term, new_term))
+            if new_pt != old_pt:
+                changes.append('выплата: %s→%s' % (old_pt, new_pt))
+            if new_sd != old_sd:
+                changes.append('дата начала: %s→%s' % (old_sd.isoformat(), new_sd.isoformat()))
+            if new_mbp != old_mbp:
+                changes.append('несниж.остаток: %s%%→%s%%' % (old_mbp, new_mbp))
+            schedule = recalc_savings_schedule(cur, sid, new_amount, new_rate, new_term, new_sd, new_pt)
+            audit_log(cur, staff, 'update_saving', 'saving', sid, cn, 'Изменение договора: %s' % ', '.join(changes) if changes else 'Пересчёт графика', ip)
+            conn.commit()
+            return {'success': True, 'schedule': schedule, 'new_end_date': new_ed.isoformat()}
+
         elif action == 'change_rate':
             sid = int(body['saving_id'])
             new_rate = safe_float(body.get('new_rate'), 'ставка')

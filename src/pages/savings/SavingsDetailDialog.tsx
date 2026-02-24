@@ -31,6 +31,7 @@ interface SavingsDetailDialogProps {
   onDeleteContract: () => void;
   onDeleteAccrual: (id: number) => void;
   onClearAccruals: () => void;
+  onEdit: () => void;
 }
 
 const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
@@ -99,8 +100,9 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
 
         {(isAdmin || isManager) && (
           <div className="flex flex-wrap gap-2 justify-between">
-            {detail.status === "active" && (
-              <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={props.onEdit}><Icon name="Pencil" size={14} className="mr-1" />Редактировать</Button>
+              {detail.status === "active" && (<>
                 <Button size="sm" onClick={props.onDeposit}><Icon name="Plus" size={14} className="mr-1" />Пополнение</Button>
                 <Button size="sm" onClick={props.onInterest} disabled={detail.accrued_interest <= 0}><Icon name="DollarSign" size={14} className="mr-1" />Выплатить %</Button>
                 <Button size="sm" onClick={props.onWithdrawal}><Icon name="Minus" size={14} className="mr-1" />Изъятие</Button>
@@ -108,8 +110,8 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
                 <Button size="sm" onClick={props.onRateChange}><Icon name="Percent" size={14} className="mr-1" />Изменить ставку</Button>
                 <Button size="sm" onClick={props.onBackfill}><Icon name="RefreshCw" size={14} className="mr-1" />Доначислить %</Button>
                 <Button size="sm" variant="destructive" onClick={props.onEarlyClose}><Icon name="XCircle" size={14} className="mr-1" />Досрочное закрытие</Button>
-              </div>
-            )}
+              </>)}
+            </div>
             {isAdmin && <Button size="sm" variant="destructive" onClick={props.onDeleteContract}><Icon name="Trash2" size={14} className="mr-1" />Удалить договор</Button>}
           </div>
         )}
