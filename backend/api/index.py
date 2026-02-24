@@ -185,18 +185,17 @@ def recalc_loan_schedule_statuses(cur, lid):
         pay_ip = Decimal('0')
         pay_pnp = Decimal('0')
         
-        # Единая логика разнесения платежа:
-        # 1. Закрываем все просроченные периоды (плановая дата < дата платежа) — % → штраф → ОД
-        # 2. Закрываем ОДИН текущий/ближайший период (первый непогашенный) — % → штраф → ОД
-        # 3. Весь остаток → досрочное погашение ОД (не переходит на будущие периоды)
+        # Логика разнесения платежа:
+        # 1. Закрываем периоды с плановой датой <= дата платежа (просроченные + текущий)
+        # 2. Весь остаток → досрочное погашение ОД (НЕ переходит на будущие периоды)
         cur.execute("""
-            SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
+            SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
             FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial')
+            AND payment_date <= '%s'
             ORDER BY payment_no, id
-        """ % lid)
+        """ % (lid, pay_date))
         unpaid_rows = cur.fetchall()
 
-        covered_one_future = False
         for row in unpaid_rows:
             if remaining <= Decimal('0.005'):
                 break
@@ -205,11 +204,6 @@ def recalc_loan_schedule_statuses(cur, lid):
             si = Decimal(str(row[2]))
             spn = Decimal(str(row[3]))
             spa = Decimal(str(row[4]))
-            sch_date = str(row[5])
-
-            is_future = sch_date > pay_date
-            if is_future and covered_one_future:
-                break
 
             already_i = min(spa, si)
             already_pn = min(spa - si, spn) if spa > si else Decimal('0')
@@ -221,8 +215,6 @@ def recalc_loan_schedule_statuses(cur, lid):
             need_total = need_i + need_pn + need_pp
 
             if need_total <= Decimal('0.005'):
-                if is_future:
-                    covered_one_future = True
                 continue
 
             take_total = min(remaining, need_total)
@@ -241,10 +233,7 @@ def recalc_loan_schedule_statuses(cur, lid):
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s', payment_id=%s WHERE id=%s" % (float(new_paid), pay_date, ns, pay_id, sid))
 
-            if is_future:
-                covered_one_future = True
-
-        # Остаток → досрочное погашение ОД
+        # Остаток → досрочное погашение ОД (не переходит на будущие периоды)
         if remaining > Decimal('0.005'):
             pay_pp += remaining
             remaining = Decimal('0')
@@ -653,18 +642,17 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             remaining_amt = amt
 
             if first_row:
-                # Единая логика разнесения платежа:
-                # 1. Закрываем все просроченные периоды (плановая дата < дата платежа)
-                # 2. Закрываем ОДИН текущий/ближайший период (первый непогашенный)
-                # 3. Весь остаток → досрочное погашение ОД
+                # Логика разнесения платежа:
+                # 1. Закрываем периоды с плановой датой <= дата платежа (просроченные + текущий)
+                # 2. Весь остаток → досрочное погашение ОД (НЕ переходит на будущие периоды)
                 cur.execute("""
-                    SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount, payment_date
+                    SELECT id, principal_amount, interest_amount, penalty_amount, paid_amount
                     FROM loan_schedule WHERE loan_id=%s AND status IN ('pending','partial','overdue')
+                    AND payment_date <= '%s'
                     ORDER BY payment_no, id
-                """ % lid)
+                """ % (lid, pd))
                 unpaid_rows = cur.fetchall()
 
-                covered_one_future = False
                 for row in unpaid_rows:
                     if remaining_amt <= Decimal('0.005'):
                         break
@@ -673,11 +661,6 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     si = Decimal(str(row[2]))
                     spn = Decimal(str(row[3]))
                     spa = Decimal(str(row[4]))
-                    sch_date = str(row[5])
-
-                    is_future = sch_date > pd
-                    if is_future and covered_one_future:
-                        break
 
                     already_i = min(spa, si)
                     already_pn = min(spa - si, spn) if spa > si else Decimal('0')
@@ -689,8 +672,6 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     need_total = need_i + need_pn + need_pp
 
                     if need_total <= Decimal('0.005'):
-                        if is_future:
-                            covered_one_future = True
                         continue
 
                     take_total = min(remaining_amt, need_total)
@@ -709,10 +690,7 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     ns = 'paid' if new_paid >= total_item else 'partial'
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
 
-                    if is_future:
-                        covered_one_future = True
-
-                # Остаток → досрочное погашение ОД
+                # Остаток → досрочное погашение ОД (не переходит на будущие периоды)
                 if remaining_amt > Decimal('0.005'):
                     pp += remaining_amt
                     remaining_amt = Decimal('0')
