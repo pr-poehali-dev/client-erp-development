@@ -119,26 +119,32 @@ def calc_end_of_term_schedule(amount, rate, term, start_date):
         })
     return schedule, float(schedule[0]['payment_amount']) if schedule else 0
 
+def build_savings_boundaries(start_date, term):
+    close_date = add_months(start_date, term)
+    boundaries = [start_date]
+    eom = last_day_of_month(start_date)
+    while eom < close_date:
+        if eom > start_date:
+            boundaries.append(eom)
+        eom = last_day_of_month(eom + timedelta(days=1))
+    if boundaries[-1] != close_date:
+        boundaries.append(close_date)
+    return boundaries, close_date
+
 def calc_savings_schedule(amount, rate, term, start_date, payout_type):
     amt = Decimal(str(amount))
     schedule = []
     cumulative = Decimal('0')
-    close_date = add_months(start_date, term)
-    for i in range(1, term + 1):
-        if i == 1:
-            period_start = start_date
-        else:
-            period_start = last_day_of_month(add_months(start_date, i - 1))
-        if i == term:
-            period_end = close_date
-        else:
-            period_end = last_day_of_month(add_months(start_date, i))
+    boundaries, close_date = build_savings_boundaries(start_date, term)
+    for i in range(len(boundaries) - 1):
+        period_start = boundaries[i]
+        period_end = boundaries[i + 1]
         actual_days = (period_end - period_start).days
         interest = (amt * Decimal(str(rate)) / Decimal('100') * Decimal(str(actual_days)) / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         cumulative += interest
         balance_after = float(amt + cumulative) if payout_type == 'end_of_term' else float(amt)
         schedule.append({
-            'period_no': i, 'period_start': period_start.isoformat(),
+            'period_no': i + 1, 'period_start': period_start.isoformat(),
             'period_end': period_end.isoformat(), 'interest_amount': float(interest),
             'cumulative_interest': float(cumulative), 'balance_after': balance_after,
         })
@@ -1117,16 +1123,10 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
                 r = rc_r
         return r
 
-    close_date = add_months(start_date, term)
-    for i in range(1, term + 1):
-        if i == 1:
-            period_start = start_date
-        else:
-            period_start = last_day_of_month(add_months(start_date, i - 1))
-        if i == term:
-            period_end = close_date
-        else:
-            period_end = last_day_of_month(add_months(start_date, i))
+    boundaries, close_date = build_savings_boundaries(start_date, term)
+    for i in range(len(boundaries) - 1):
+        period_start = boundaries[i]
+        period_end = boundaries[i + 1]
         running_bal = Decimal('0')
         for bd, ba in bal_changes:
             if bd <= period_start:
@@ -1163,7 +1163,7 @@ def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_da
         current_rate = float(get_rate_on_date(period_end))
         balance_after = float(final_bal + cumulative) if payout_type == 'end_of_term' else float(final_bal)
         schedule.append({
-            'period_no': i, 'period_start': period_start.isoformat(),
+            'period_no': i + 1, 'period_start': period_start.isoformat(),
             'period_end': period_end.isoformat(), 'interest_amount': float(interest),
             'cumulative_interest': float(cumulative), 'balance_after': balance_after,
             'rate': current_rate,
