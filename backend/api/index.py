@@ -3616,6 +3616,8 @@ def handler(event, context):
             result = handle_org_settings(method, body, staff, cur, conn)
         elif entity == 'organizations':
             result = handle_organizations(method, params, body, staff, cur, conn, src_ip)
+        elif entity == 'public_orgs':
+            result = query_rows(cur, "SELECT name, short_name, inn FROM organizations WHERE is_active=true ORDER BY name")
         elif entity == 'staff_auth':
             result = handle_staff_auth(body, cur, conn, src_ip)
         elif entity == 'auth':

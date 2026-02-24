@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,11 @@ const Login = () => {
   const [setupToken, setSetupToken] = useState("");
   const [debugCode, setDebugCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [orgs, setOrgs] = useState<{ name: string; short_name: string; inn: string }[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => { api.publicOrgs().then(setOrgs).catch(() => {}); }, []);
 
   const saveAuth = (token: string, user: { name: string; member_id: number }) => {
     localStorage.setItem("cabinet_token", token);
@@ -301,6 +304,17 @@ const Login = () => {
         <p className="text-center text-xs text-muted-foreground mt-6">
           <a href="/" className="hover:underline">Перейти в систему управления</a>
         </p>
+
+        {orgs.length > 0 && (
+          <div className="mt-8 text-center space-y-2">
+            {orgs.map((o, i) => (
+              <div key={i} className="text-[11px] text-muted-foreground/70 leading-tight">
+                <span>{o.short_name || o.name}</span>
+                {o.inn && <span className="ml-1.5">ИНН {o.inn}</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

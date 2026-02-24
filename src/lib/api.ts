@@ -151,6 +151,8 @@ export const api = {
     },
   },
 
+  publicOrgs: () => request<{ name: string; short_name: string; inn: string }[]>("GET", { entity: "public_orgs" }),
+
   auth: {
     sendSms: (phone: string) => request<AuthSmsResult>("POST", undefined, { entity: "auth", action: "send_sms", phone }),
     verifySms: (phone: string, code: string) => request<AuthVerifyResult>("POST", undefined, { entity: "auth", action: "verify_sms", phone, code }),
