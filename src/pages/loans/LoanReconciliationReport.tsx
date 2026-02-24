@@ -258,15 +258,36 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                             <div className="text-right">%</div>
                             <div className="text-right">Штраф</div>
                           </div>
-                          {row.payments.map((p, idx) => (
-                            <div key={idx} className="grid grid-cols-5 gap-2 text-xs py-1 border-b border-muted/40 last:border-0">
-                              <div className="font-medium">{fmtDate(p.fact_date)}</div>
-                              <div className="text-right font-semibold text-green-700">{fmt(p.amount)}</div>
-                              <div className="text-right">{fmt(p.principal)}</div>
-                              <div className="text-right">{fmt(p.interest)}</div>
-                              <div className="text-right">{p.penalty > 0 ? fmt(p.penalty) : "—"}</div>
-                            </div>
-                          ))}
+                          {row.payments.map((p, idx) => {
+                            const diffPP = p.pay_principal - p.principal;
+                            const diffIP = p.pay_interest - p.interest;
+                            const diffPnp = p.pay_penalty - p.penalty;
+                            const hasDiff = Math.abs(diffPP) > 0.005 || Math.abs(diffIP) > 0.005 || Math.abs(diffPnp) > 0.005;
+                            const fmtDiff = (d: number) =>
+                              d > 0.005 ? <span className="text-green-600">+{fmt(d)}</span>
+                              : d < -0.005 ? <span className="text-red-600">−{fmt(Math.abs(d))}</span>
+                              : null;
+                            return (
+                              <div key={idx}>
+                                <div className="grid grid-cols-5 gap-2 text-xs py-1 border-b border-muted/40">
+                                  <div className="font-medium">{fmtDate(p.fact_date)}</div>
+                                  <div className="text-right font-semibold text-green-700">{fmt(p.amount)}</div>
+                                  <div className="text-right">{fmt(p.principal)}</div>
+                                  <div className="text-right">{fmt(p.interest)}</div>
+                                  <div className="text-right">{p.penalty > 0 ? fmt(p.penalty) : "—"}</div>
+                                </div>
+                                {hasDiff && (
+                                  <div className="grid grid-cols-5 gap-2 text-xs py-0.5 border-b border-dashed border-muted/40 italic text-muted-foreground">
+                                    <div>отклонение</div>
+                                    <div className="text-right">{fmtDiff(p.fact_amount - p.amount)}</div>
+                                    <div className="text-right">{fmtDiff(diffPP)}</div>
+                                    <div className="text-right">{fmtDiff(diffIP)}</div>
+                                    <div className="text-right">{fmtDiff(diffPnp)}</div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
