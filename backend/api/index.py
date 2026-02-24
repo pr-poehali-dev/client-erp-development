@@ -232,12 +232,13 @@ def recalc_loan_schedule_statuses(cur, lid):
             ns = 'paid' if new_paid >= total_item else 'partial'
             cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pay_date, ns, sid))
 
-            # Если период закрыт и ещё есть остаток — переплата идёт в ОД, не перетекает в следующий период
-            if ns == 'paid' and remaining > Decimal('0.005'):
-                pay_pp += remaining
-                remaining = Decimal('0')
-                break
-        
+            # Остаток продолжает закрывать следующие периоды (% и ОД) в цикле.
+
+        # После закрытия всех периодов — остаток идёт в досрочное погашение ОД
+        if remaining > Decimal('0.005'):
+            pay_pp += remaining
+            remaining = Decimal('0')
+
         cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
             float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
     
@@ -456,57 +457,102 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     'payments': []
                 })
 
-            # Привязываем платежи к периодам на основе данных из БД:
-            # хронологически распределяем платежи по периодам согласно paid_amount в loan_schedule.
-            # Разбивку ОД/% берём из самого платежа (principal_part/interest_part) пропорционально
-            # той части платежа, которая покрывает данный период.
-            pay_remaining = []  # (pay_id, pay_date, remaining, pp_left, ip_left, pnp_left, pay_type)
-            for pay_row in payment_rows:
-                pay_id, pay_date, pay_amt, pay_pp, pay_ip, pay_pnp, pay_type = pay_row
-                pay_remaining.append([pay_id, pay_date, Decimal(str(pay_amt)),
-                                      Decimal(str(pay_pp)), Decimal(str(pay_ip)),
-                                      Decimal(str(pay_pnp)), pay_type, Decimal(str(pay_amt)),
-                                      Decimal(str(pay_pp)), Decimal(str(pay_ip)), Decimal(str(pay_pnp))])
+            # Привязываем платежи к периодам используя единую логику:
+            # каждый платёж последовательно закрывает периоды по схеме % -> штраф -> ОД.
+            # Остаток после закрытия всех периодов — досрочное погашение ОД последнего закрытого периода.
+            # Эта логика идентична recalc_loan_schedule_statuses и внесению платежа.
 
-            pay_idx = 0
+            # Строим список периодов с need_* для каждого (сколько ещё нужно внести)
+            sch_needs = []
             for sch in schedule_list:
-                sch_paid = Decimal(str(sch['paid_amount']))
-                if sch_paid <= Decimal('0.005'):
-                    continue
-                to_cover = sch_paid
-                while to_cover > Decimal('0.005') and pay_idx < len(pay_remaining):
-                    pr = pay_remaining[pay_idx]
-                    pay_id, pay_date, remaining, pp_left, ip_left, pnp_left, pay_type, pay_total, pay_pp_d, pay_ip_d, pay_pnp_d = pr
-                    if remaining <= Decimal('0.005'):
-                        pay_idx += 1
+                sp = Decimal(str(sch['plan_principal']))
+                si = Decimal(str(sch['plan_interest']))
+                spn = Decimal(str(sch['plan_penalty']))
+                paid = Decimal(str(sch['paid_amount']))
+                already_i = min(paid, si)
+                already_pn = min(paid - si, spn) if paid > si else Decimal('0')
+                already_pp = paid - already_i - already_pn if paid > already_i + already_pn else Decimal('0')
+                sch_needs.append({
+                    'sch': sch,
+                    'need_i': si - already_i,
+                    'need_pn': spn - already_pn,
+                    'need_pp': sp - already_pp,
+                    'paid_so_far': Decimal('0'),  # накопленное в этом проходе
+                })
+
+            sch_idx = 0
+            for pay_row in payment_rows:
+                pay_id, pay_date, pay_amt, pay_pp_d, pay_ip_d, pay_pnp_d, pay_type = pay_row
+                remaining = Decimal(str(pay_amt))
+                pay_total = Decimal(str(pay_amt))
+
+                i = sch_idx
+                while remaining > Decimal('0.005') and i < len(sch_needs):
+                    sn = sch_needs[i]
+                    need_i = sn['need_i']
+                    need_pn = sn['need_pn']
+                    need_pp = sn['need_pp']
+                    need_total = need_i + need_pn + need_pp
+
+                    if need_total <= Decimal('0.005'):
+                        i += 1
+                        if i > sch_idx:
+                            sch_idx = i
                         continue
-                    take = min(remaining, to_cover)
-                    to_cover -= take
-                    pr[2] -= take  # remaining
-                    # Берём ОД/% из платежа напрямую (они уже рассчитаны при внесении):
-                    # сначала штраф, затем проценты, ОД — остаток
-                    take_pnp = min(pnp_left, take)
-                    after_pnp = take - take_pnp
-                    take_ip = min(ip_left, after_pnp)
-                    take_pp = after_pnp - take_ip
-                    pr[3] -= take_pp
-                    pr[4] -= take_ip
-                    pr[5] -= take_pnp
-                    sch['payments'].append({
+
+                    take_total = min(remaining, need_total)
+                    item_i = min(take_total, need_i)
+                    after_i = take_total - item_i
+                    item_pn = min(after_i, need_pn)
+                    item_pp = after_i - item_pn
+                    remaining -= take_total
+
+                    sn['need_i'] -= item_i
+                    sn['need_pn'] -= item_pn
+                    sn['need_pp'] -= item_pp
+                    sn['paid_so_far'] += take_total
+
+                    sn['sch']['payments'].append({
                         'payment_id': pay_id,
                         'fact_date': str(pay_date),
-                        'amount': round(float(take), 2),
+                        'amount': round(float(take_total), 2),
                         'fact_amount': round(float(pay_total), 2),
-                        'principal': round(float(take_pp), 2),
-                        'interest': round(float(take_ip), 2),
-                        'penalty': round(float(take_pnp), 2),
+                        'principal': round(float(item_pp), 2),
+                        'interest': round(float(item_i), 2),
+                        'penalty': round(float(item_pn), 2),
                         'pay_principal': round(float(pay_pp_d), 2),
                         'pay_interest': round(float(pay_ip_d), 2),
                         'pay_penalty': round(float(pay_pnp_d), 2),
                         'payment_type': pay_type,
                     })
-                    if pr[2] <= Decimal('0.005'):
-                        pay_idx += 1
+
+                    # Период полностью закрыт — переходим к следующему
+                    if sn['need_i'] + sn['need_pn'] + sn['need_pp'] <= Decimal('0.005'):
+                        i += 1
+                        sch_idx = i
+
+                # Остаток после всех периодов — досрочное погашение ОД, добавляем к последнему закрытому периоду
+                if remaining > Decimal('0.005') and sch_idx > 0:
+                    last_sn = sch_needs[sch_idx - 1]
+                    if last_sn['sch']['payments']:
+                        last_entry = last_sn['sch']['payments'][-1]
+                        if last_entry['payment_id'] == pay_id:
+                            last_entry['amount'] = round(last_entry['amount'] + float(remaining), 2)
+                            last_entry['principal'] = round(last_entry['principal'] + float(remaining), 2)
+                        else:
+                            last_sn['sch']['payments'].append({
+                                'payment_id': pay_id,
+                                'fact_date': str(pay_date),
+                                'amount': round(float(remaining), 2),
+                                'fact_amount': round(float(pay_total), 2),
+                                'principal': round(float(remaining), 2),
+                                'interest': 0.0,
+                                'penalty': 0.0,
+                                'pay_principal': round(float(pay_pp_d), 2),
+                                'pay_interest': round(float(pay_ip_d), 2),
+                                'pay_penalty': round(float(pay_pnp_d), 2),
+                                'payment_type': pay_type,
+                            })
 
             total_plan = sum(s['plan_total'] for s in schedule_list)
             total_paid = sum(float(r[2]) for r in payment_rows)
@@ -717,11 +763,13 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     ns = 'paid' if new_paid >= total_item else 'partial'
                     cur.execute("UPDATE loan_schedule SET paid_amount=%s, paid_date='%s', status='%s' WHERE id=%s" % (float(new_paid), pd, ns, sid))
 
-                    # Период закрыт и есть остаток — переплата идёт в ОД, не в % следующего периода
-                    if ns == 'paid' and remaining_amt > Decimal('0.005'):
-                        pp += remaining_amt
-                        remaining_amt = Decimal('0')
-                        break
+                    # Остаток продолжает закрывать следующие периоды (% и ОД) в цикле.
+                    # После того как все периоды закрыты — оставшийся остаток пойдёт в досрочное погашение ОД.
+
+                # После закрытия всех периодов — остаток идёт в досрочное погашение ОД
+                if remaining_amt > Decimal('0.005'):
+                    pp += remaining_amt
+                    remaining_amt = Decimal('0')
             else:
                 pp = min(amt, loan_bal)
 
