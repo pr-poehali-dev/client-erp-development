@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { api, ReconciliationReport, ReconciliationScheduleRow } from "@/lib/api";
 import Icon from "@/components/ui/icon";
-
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
@@ -26,13 +25,6 @@ const statusVariant = (s: string): "default" | "destructive" | "warning" | "seco
   if (s === "overdue") return "destructive";
   if (s === "partial") return "warning";
   return "secondary";
-};
-
-const payTypeLabel: Record<string, string> = {
-  regular: "Регулярный",
-  early_partial: "Досрочный (частичный)",
-  early_full: "Досрочный (полный)",
-  manual: "Ручной",
 };
 
 interface Props {
@@ -63,10 +55,10 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
       .finally(() => setLoading(false));
   }, [open, loanId]);
 
-  const toggleRow = (id: number) => {
+  const toggleRow = (paymentNo: number) => {
     setExpandedRows(prev => {
       const next = new Set(prev);
-      if (next.has(id)) { next.delete(id); } else { next.add(id); }
+      if (next.has(paymentNo)) { next.delete(paymentNo); } else { next.add(paymentNo); }
       return next;
     });
   };
@@ -79,8 +71,6 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
     const row = (cells: (string | number)[]) => cells.map(c => `"${String(c).replace(/"/g, '""')}"`).join(";");
 
     const lines: string[] = [];
-
-    // Сводка
     lines.push(row(["Отчёт по сверке платежей"]));
     lines.push(row(["Договор", loan.contract_no]));
     lines.push(row(["Заёмщик", loan.member_name]));
@@ -97,7 +87,6 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
     lines.push(row(["Просроченный долг", n(s.total_overdue)]));
     lines.push(row([""]));
 
-    // График
     lines.push(row(["№", "Плановая дата", "Сумма (план)", "ОД (план)", "% (план)", "Штраф (план)", "Оплачено", "Разница", "Статус", "Дата оплаты"]));
     for (const r of schedule) {
       const statusTxt = r.status === "paid" ? "Оплачен" : r.status === "partial" ? "Частично" : r.status === "overdue" ? "Просрочен" : "Ожидается";
@@ -106,7 +95,6 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
     lines.push(row(["ИТОГО", "", n(s.total_plan), "", "", "", n(s.total_paid), n(s.total_diff), "", ""]));
     lines.push(row([""]));
 
-    // Расшифровка
     lines.push(row(["РАСШИФРОВКА ПЛАТЕЖЕЙ ПО ПЕРИОДАМ"]));
     lines.push(row(["№ периода", "Плановая дата", "Дата платежа (факт)", "Засчитано", "ОД", "%", "Штраф"]));
     for (const r of schedule) {
@@ -202,122 +190,101 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
               </Card>
             </div>
 
-            {/* Таблица */}
+            {/* Список периодов */}
             <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-8">№</th>
-                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Плановая дата</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground">Сумма по плану</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">ОД</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">%</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground">Оплачено</th>
-                    <th className="text-right px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Разница</th>
-                    <th className="text-center px-3 py-2 font-medium text-muted-foreground">Статус</th>
-                    <th className="w-8"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.schedule.map((row: ReconciliationScheduleRow) => {
-                    const diff = row.plan_total - row.paid_amount;
-                    const isExpanded = expandedRows.has(row.id);
-                    const hasPayments = row.payments.length > 0;
-                    return (
-                      <React.Fragment key={row.id}>
-                        <tr
-                          className={`border-t transition-colors ${hasPayments ? "cursor-pointer hover:bg-muted/30" : ""} ${row.status === "overdue" ? "bg-red-50/50" : row.status === "partial" ? "bg-yellow-50/30" : ""}`}
-                          onClick={() => hasPayments && toggleRow(row.id)}
-                        >
-                          <td className="px-3 py-2 text-muted-foreground">{row.payment_no}</td>
-                          <td className="px-3 py-2 font-medium">{fmtDate(row.plan_date)}</td>
-                          <td className="px-3 py-2 text-right">{fmt(row.plan_total)}</td>
-                          <td className="px-3 py-2 text-right hidden md:table-cell text-muted-foreground">{fmt(row.plan_principal)}</td>
-                          <td className="px-3 py-2 text-right hidden md:table-cell text-muted-foreground">{fmt(row.plan_interest)}</td>
-                          <td className="px-3 py-2 text-right font-medium">{row.paid_amount > 0 ? fmt(row.paid_amount) : "—"}</td>
-                          <td className={`px-3 py-2 text-right hidden md:table-cell font-medium ${diff > 0.01 ? "text-red-600" : diff < -0.01 ? "text-green-600" : "text-muted-foreground"}`}>
-                            {Math.abs(diff) > 0.01 ? (diff > 0 ? "−" : "+") + fmt(Math.abs(diff)) : "0"}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Badge variant={statusVariant(row.status)} className="text-xs">
-                              {statusLabel[row.status] || row.status}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2 text-center text-muted-foreground">
-                            {hasPayments && (
-                              <Icon name={isExpanded ? "ChevronUp" : "ChevronDown"} size={14} />
-                            )}
-                          </td>
-                        </tr>
-                        {isExpanded && hasPayments && (
-                          <tr key={`${row.id}-detail`} className="border-t bg-muted/20">
-                            <td colSpan={9} className="px-4 py-3">
-                              <div className="text-xs font-medium text-muted-foreground mb-2">Платежи, закрывающие период №{row.payment_no}:</div>
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="text-muted-foreground">
-                                    <th className="text-left pb-1 pr-4">Дата факт.</th>
-                                    <th className="text-right pb-1 pr-4">Засчитано</th>
-                                    <th className="text-right pb-1 pr-4">ОД</th>
-                                    <th className="text-right pb-1 pr-4">%</th>
-                                    <th className="text-right pb-1">Штраф</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {row.payments.map((p, idx) => {
-                                    const diffPP = p.pay_principal - p.principal;
-                                    const diffIP = p.pay_interest - p.interest;
-                                    const diffPnp = p.pay_penalty - p.penalty;
-                                    const hasDiff = Math.abs(diffPP) > 0.005 || Math.abs(diffIP) > 0.005 || Math.abs(diffPnp) > 0.005;
-                                    const fmtDiff = (d: number) => d > 0.005
-                                      ? <span className="text-green-600">+{fmt(d)}</span>
-                                      : d < -0.005
-                                        ? <span className="text-red-600">−{fmt(Math.abs(d))}</span>
-                                        : null;
-                                    return (
-                                      <React.Fragment key={idx}>
-                                        <tr className="border-t border-muted">
-                                          <td className="py-1 pr-4 font-medium">{fmtDate(p.fact_date)}</td>
-                                          <td className="py-1 pr-4 text-right font-semibold text-green-700">{fmt(p.fact_amount)}</td>
-                                          <td className="py-1 pr-4 text-right">{fmt(p.pay_principal)}</td>
-                                          <td className="py-1 pr-4 text-right">{fmt(p.pay_interest)}</td>
-                                          <td className="py-1 text-right">{p.pay_penalty > 0 ? fmt(p.pay_penalty) : "—"}</td>
-                                        </tr>
-                                        {hasDiff && (
-                                          <tr className="border-t border-dashed border-muted/60">
-                                            <td className="py-0.5 pr-4 text-muted-foreground italic text-xs">отклонение от плана</td>
-                                            <td className="py-0.5 pr-4 text-right text-xs">{fmtDiff(p.fact_amount - p.amount)}</td>
-                                            <td className="py-0.5 pr-4 text-right text-xs">{fmtDiff(diffPP)}</td>
-                                            <td className="py-0.5 pr-4 text-right text-xs">{fmtDiff(diffIP)}</td>
-                                            <td className="py-0.5 text-right text-xs">{fmtDiff(diffPnp)}</td>
-                                          </tr>
-                                        )}
-                                      </React.Fragment>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </td>
-                          </tr>
+              {/* Заголовок */}
+              <div className="grid grid-cols-[2rem_1fr_1fr_1fr_1fr_1fr_2rem] gap-0 bg-muted/50 text-xs font-medium text-muted-foreground border-b">
+                <div className="px-3 py-2">№</div>
+                <div className="px-3 py-2">Плановая дата</div>
+                <div className="px-3 py-2 text-right">По плану</div>
+                <div className="px-3 py-2 text-right hidden md:block">ОД / %</div>
+                <div className="px-3 py-2 text-right">Оплачено</div>
+                <div className="px-3 py-2 text-center">Статус</div>
+                <div className="px-3 py-2"></div>
+              </div>
+
+              {report.schedule.map((row: ReconciliationScheduleRow) => {
+                const diff = row.plan_total - row.paid_amount;
+                const isExpanded = expandedRows.has(row.payment_no);
+                const hasPayments = row.payments.length > 0;
+
+                return (
+                  <div key={row.payment_no} className="border-b last:border-b-0">
+                    {/* Строка периода */}
+                    <div
+                      className={`grid grid-cols-[2rem_1fr_1fr_1fr_1fr_1fr_2rem] gap-0 text-sm transition-colors
+                        ${hasPayments ? "cursor-pointer hover:bg-muted/30" : ""}
+                        ${row.status === "overdue" ? "bg-red-50/50" : row.status === "partial" ? "bg-yellow-50/30" : ""}`}
+                      onClick={() => hasPayments && toggleRow(row.payment_no)}
+                    >
+                      <div className="px-3 py-2 text-muted-foreground">{row.payment_no}</div>
+                      <div className="px-3 py-2 font-medium">{fmtDate(row.plan_date)}</div>
+                      <div className="px-3 py-2 text-right">{fmt(row.plan_total)}</div>
+                      <div className="px-3 py-2 text-right hidden md:block text-muted-foreground text-xs">
+                        <div>{fmt(row.plan_principal)}</div>
+                        <div>{fmt(row.plan_interest)}</div>
+                      </div>
+                      <div className="px-3 py-2 text-right font-medium">
+                        <div>{row.paid_amount > 0 ? fmt(row.paid_amount) : "—"}</div>
+                        {Math.abs(diff) > 0.01 && (
+                          <div className={`text-xs ${diff > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                            {diff > 0 ? "−" : "+"}{fmt(Math.abs(diff))}
+                          </div>
                         )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-                <tfoot className="bg-muted/50 border-t-2">
-                  <tr>
-                    <td colSpan={2} className="px-3 py-2 font-semibold">Итого</td>
-                    <td className="px-3 py-2 text-right font-semibold">{fmt(summary.total_plan)}</td>
-                    <td className="px-3 py-2 hidden md:table-cell"></td>
-                    <td className="px-3 py-2 hidden md:table-cell"></td>
-                    <td className="px-3 py-2 text-right font-semibold text-green-700">{fmt(summary.total_paid)}</td>
-                    <td className={`px-3 py-2 text-right font-semibold hidden md:table-cell ${summary.total_diff > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                      {Math.abs(summary.total_diff) > 0.01 ? (summary.total_diff > 0 ? "−" : "+") + fmt(Math.abs(summary.total_diff)) : "0"}
-                    </td>
-                    <td colSpan={2}></td>
-                  </tr>
-                </tfoot>
-              </table>
+                      </div>
+                      <div className="px-3 py-2 flex items-center justify-center">
+                        <Badge variant={statusVariant(row.status)} className="text-xs">
+                          {statusLabel[row.status] || row.status}
+                        </Badge>
+                      </div>
+                      <div className="px-3 py-2 flex items-center justify-center text-muted-foreground">
+                        {hasPayments && (
+                          <Icon name={isExpanded ? "ChevronUp" : "ChevronDown"} size={14} />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Детализация */}
+                    {isExpanded && hasPayments && (
+                      <div className="bg-muted/10 border-t px-4 py-3">
+                        <div className="text-xs font-medium text-muted-foreground mb-2">
+                          Платежи, закрывающие период №{row.payment_no}:
+                        </div>
+                        <div className="space-y-1">
+                          <div className="grid grid-cols-5 gap-2 text-xs text-muted-foreground font-medium pb-1 border-b">
+                            <div>Дата факт.</div>
+                            <div className="text-right">Засчитано</div>
+                            <div className="text-right">ОД</div>
+                            <div className="text-right">%</div>
+                            <div className="text-right">Штраф</div>
+                          </div>
+                          {row.payments.map((p, idx) => (
+                            <div key={idx} className="grid grid-cols-5 gap-2 text-xs py-1 border-b border-muted/40 last:border-0">
+                              <div className="font-medium">{fmtDate(p.fact_date)}</div>
+                              <div className="text-right font-semibold text-green-700">{fmt(p.amount)}</div>
+                              <div className="text-right">{fmt(p.principal)}</div>
+                              <div className="text-right">{fmt(p.interest)}</div>
+                              <div className="text-right">{p.penalty > 0 ? fmt(p.penalty) : "—"}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Итого */}
+              <div className="grid grid-cols-[2rem_1fr_1fr_1fr_1fr_1fr_2rem] gap-0 bg-muted/50 border-t-2 text-sm font-semibold">
+                <div className="px-3 py-2 col-span-2">Итого</div>
+                <div className="px-3 py-2 text-right">{fmt(summary.total_plan)}</div>
+                <div className="px-3 py-2 hidden md:block"></div>
+                <div className="px-3 py-2 text-right text-green-700">{fmt(summary.total_paid)}</div>
+                <div className={`px-3 py-2 text-center text-xs ${summary.total_diff > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                  {Math.abs(summary.total_diff) > 0.01 ? (summary.total_diff > 0 ? "−" : "+") + fmt(Math.abs(summary.total_diff)) : "✓"}
+                </div>
+                <div></div>
+              </div>
             </div>
 
             <div className="text-xs text-muted-foreground text-center">
