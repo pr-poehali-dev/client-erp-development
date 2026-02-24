@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -224,9 +224,8 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                     const isExpanded = expandedRows.has(row.id);
                     const hasPayments = row.payments.length > 0;
                     return (
-                      <>
+                      <React.Fragment key={row.id}>
                         <tr
-                          key={row.id}
                           className={`border-t transition-colors ${hasPayments ? "cursor-pointer hover:bg-muted/30" : ""} ${row.status === "overdue" ? "bg-red-50/50" : row.status === "partial" ? "bg-yellow-50/30" : ""}`}
                           onClick={() => hasPayments && toggleRow(row.id)}
                         >
@@ -276,8 +275,8 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                                         ? <span className="text-red-600">−{fmt(Math.abs(d))}</span>
                                         : null;
                                     return (
-                                      <>
-                                        <tr key={idx} className="border-t border-muted">
+                                      <React.Fragment key={idx}>
+                                        <tr className="border-t border-muted">
                                           <td className="py-1 pr-4 font-medium">{fmtDate(p.fact_date)}</td>
                                           <td className="py-1 pr-4 text-right font-semibold text-green-700">{fmt(p.fact_amount)}</td>
                                           <td className="py-1 pr-4 text-right">{fmt(p.pay_principal)}</td>
@@ -285,7 +284,7 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                                           <td className="py-1 text-right">{p.pay_penalty > 0 ? fmt(p.pay_penalty) : "—"}</td>
                                         </tr>
                                         {hasDiff && (
-                                          <tr key={`${idx}-diff`} className="border-t border-dashed border-muted/60">
+                                          <tr className="border-t border-dashed border-muted/60">
                                             <td className="py-0.5 pr-4 text-muted-foreground italic text-xs">отклонение от плана</td>
                                             <td className="py-0.5 pr-4 text-right text-xs">{fmtDiff(p.fact_amount - p.amount)}</td>
                                             <td className="py-0.5 pr-4 text-right text-xs">{fmtDiff(diffPP)}</td>
@@ -293,7 +292,7 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                                             <td className="py-0.5 text-right text-xs">{fmtDiff(diffPnp)}</td>
                                           </tr>
                                         )}
-                                      </>
+                                      </React.Fragment>
                                     );
                                   })}
                                 </tbody>
@@ -301,7 +300,7 @@ const LoanReconciliationReport = ({ open, onOpenChange, loanId, contractNo }: Pr
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
