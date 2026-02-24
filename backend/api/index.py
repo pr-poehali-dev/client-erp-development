@@ -206,7 +206,8 @@ def recalc_loan_schedule_statuses(cur, lid):
             is_future = sch_date > pay_date
             if is_future and covered_one_future:
                 break
-            if is_future and remaining < Decimal('1'):
+            need_total_for_row = sp + si + spn - spa
+            if is_future and remaining < need_total_for_row:
                 break
 
             already_i = min(spa, si)
@@ -248,6 +249,15 @@ def recalc_loan_schedule_statuses(cur, lid):
 
         cur.execute("UPDATE loan_payments SET principal_part=%s, interest_part=%s, penalty_part=%s WHERE id=%s" % (
             float(pay_pp), float(pay_ip), float(pay_pnp), pay_id))
+    
+    cur.execute("SELECT amount FROM loans WHERE id=%s" % lid)
+    orig_amount = Decimal(str(cur.fetchone()[0]))
+    cur.execute("SELECT COALESCE(SUM(principal_part),0) FROM loan_payments WHERE loan_id=%s" % lid)
+    total_paid_principal = Decimal(str(cur.fetchone()[0]))
+    real_balance = orig_amount - total_paid_principal
+    if real_balance < 0:
+        real_balance = Decimal('0')
+    cur.execute("UPDATE loans SET balance=%s, updated_at=NOW() WHERE id=%s" % (float(real_balance), lid))
     
     refresh_loan_overdue_status(cur, lid)
 
@@ -671,7 +681,8 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
                     is_future = sch_date > pd
                     if is_future and covered_one_future:
                         break
-                    if is_future and remaining_amt < Decimal('1'):
+                    need_total_for_row = sp + si + spn - spa
+                    if is_future and remaining_amt < need_total_for_row:
                         break
 
                     already_i = min(spa, si)
