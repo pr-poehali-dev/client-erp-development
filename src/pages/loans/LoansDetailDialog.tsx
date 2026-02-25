@@ -35,6 +35,7 @@ interface LoansDetailDialogProps {
   onRecalcStatuses: () => void;
   onReconciliation: () => void;
   onFixSchedule: () => void;
+  onEditLoan: () => void;
 }
 
 const LoansDetailDialog = (props: LoansDetailDialogProps) => {
@@ -92,11 +93,18 @@ const LoansDetailDialog = (props: LoansDetailDialogProps) => {
           <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Ежемесячный платёж</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{fmt(detail.monthly_payment)}</div></CardContent></Card>
         </div>
 
-        <div className="grid md:grid-cols-4 gap-2 text-sm">
-          <div><span className="text-muted-foreground">Ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
-          <div><span className="text-muted-foreground">Срок:</span> <span className="font-medium">{detail.term_months} мес.</span></div>
-          <div><span className="text-muted-foreground">Начало:</span> <span className="font-medium">{fmtDate(detail.start_date)}</span></div>
-          <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
+        <div className="flex items-center justify-between">
+          <div className="grid md:grid-cols-4 gap-2 text-sm flex-1">
+            <div><span className="text-muted-foreground">Ставка:</span> <span className="font-medium">{detail.rate}%</span></div>
+            <div><span className="text-muted-foreground">Срок:</span> <span className="font-medium">{detail.term_months} мес.</span></div>
+            <div><span className="text-muted-foreground">Начало:</span> <span className="font-medium">{fmtDate(detail.start_date)}</span></div>
+            <div><span className="text-muted-foreground">Окончание:</span> <span className="font-medium">{fmtDate(detail.end_date)}</span></div>
+          </div>
+          {(isAdmin || isManager) && (
+            <button onClick={props.onEditLoan} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Редактировать параметры">
+              <Icon name="Pencil" size={16} />
+            </button>
+          )}
         </div>
 
         {(isAdmin || isManager) && (

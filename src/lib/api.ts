@@ -56,6 +56,8 @@ export const api = {
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
     modify: (data: { loan_id: number; new_rate?: number; new_term?: number }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "modify", ...data }),
+    updateLoan: (data: { loan_id: number; contract_no?: string; member_id?: number; amount?: number; rate?: number; term_months?: number; schedule_type?: string; start_date?: string; org_id?: number | null }) =>
+      request<{ success: boolean; schedule: ScheduleItem[]; monthly_payment: number; new_end_date: string; new_balance: number }>("POST", undefined, { entity: "loans", action: "update_loan", ...data }),
     deleteContract: (loanId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_contract", loan_id: loanId }),
     deleteAllPayments: (loanId: number) =>

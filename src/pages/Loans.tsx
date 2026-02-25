@@ -12,6 +12,7 @@ import LoansCreateDialog from "./loans/LoansCreateDialog";
 import LoansDetailDialog from "./loans/LoansDetailDialog";
 import LoansActionDialogs from "./loans/LoansActionDialogs";
 import LoanReconciliationReport from "./loans/LoanReconciliationReport";
+import LoanEditDialog from "./loans/LoanEditDialog";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 
@@ -74,6 +75,7 @@ const Loans = () => {
   const [overpayOptions, setOverpayOptions] = useState<Record<string, { new_monthly: number; new_term: number; description: string }>>({});
   const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
   const [showReconciliation, setShowReconciliation] = useState(false);
+  const [showEditLoan, setShowEditLoan] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -429,6 +431,7 @@ const Loans = () => {
         onRebuildSchedule={handleRebuildSchedule}
         onReconciliation={() => setShowReconciliation(true)}
         onFixSchedule={handleFixSchedule}
+        onEditLoan={() => setShowEditLoan(true)}
       />
 
       {detail && (
@@ -437,6 +440,24 @@ const Loans = () => {
           onOpenChange={setShowReconciliation}
           loanId={detail.id}
           contractNo={detail.contract_no}
+        />
+      )}
+
+      {detail && (
+        <LoanEditDialog
+          open={showEditLoan}
+          onOpenChange={setShowEditLoan}
+          detail={detail}
+          members={members}
+          orgs={orgs}
+          saving={saving}
+          setSaving={setSaving}
+          toast={toast}
+          onSaved={async () => {
+            const d = await api.loans.get(detail.id);
+            setDetail(d);
+            load();
+          }}
         />
       )}
 

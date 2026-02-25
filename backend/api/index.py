@@ -1088,6 +1088,69 @@ def handle_loans(method, params, body, cur, conn, staff=None, ip=''):
             conn.commit()
             return {'success': True, 'new_schedule': ns, 'monthly_payment': m}
 
+        elif action == 'update_loan':
+            """Редактирование всех параметров договора займа с полным пересчётом графика"""
+            lid = int(body['loan_id'])
+            cur.execute("SELECT id, contract_no, member_id, amount, rate, term_months, schedule_type, start_date, balance, status, org_id FROM loans WHERE id=%s" % lid)
+            lr = cur.fetchone()
+            if not lr:
+                return {'error': 'Договор не найден'}
+            old_cn = lr[1]
+            old_mid = int(lr[2])
+            old_amount = float(lr[3])
+            old_rate = float(lr[4])
+            old_term = int(lr[5])
+            old_st = lr[6]
+            old_sd = date.fromisoformat(str(lr[7]))
+            old_balance = float(lr[8])
+            old_org = lr[10]
+
+            cn = body.get('contract_no', old_cn).strip()
+            if cn != old_cn:
+                cur.execute("SELECT id FROM loans WHERE contract_no='%s' AND id!=%s" % (esc(cn), lid))
+                if cur.fetchone():
+                    return {'error': 'Договор с номером %s уже существует' % cn}
+            new_mid = int(body['member_id']) if 'member_id' in body else old_mid
+            new_amount = safe_float(body['amount'], 'сумма') if 'amount' in body else old_amount
+            new_rate = safe_float(body['rate'], 'ставка') if 'rate' in body else old_rate
+            new_term = safe_int(body['term_months'], 'срок') if 'term_months' in body else old_term
+            new_st = body.get('schedule_type', old_st)
+            new_sd = date.fromisoformat(body['start_date']) if 'start_date' in body else old_sd
+            new_org = body.get('org_id', old_org)
+            new_ed = add_months(new_sd, new_term)
+
+            cur.execute("DELETE FROM loan_schedule WHERE loan_id=%s" % lid)
+
+            fn = calc_annuity_schedule if new_st == 'annuity' else calc_end_of_term_schedule
+            ns, m = fn(new_amount, new_rate, new_term, new_sd)
+            for item in ns:
+                cur.execute("INSERT INTO loan_schedule (loan_id,payment_no,payment_date,payment_amount,principal_amount,interest_amount,balance_after) VALUES (%s,%s,'%s',%s,%s,%s,%s)" % (lid, item['payment_no'], item['payment_date'], item['payment_amount'], item['principal_amount'], item['interest_amount'], item['balance_after']))
+
+            cur.execute("UPDATE loans SET contract_no='%s', member_id=%s, amount=%s, rate=%s, term_months=%s, schedule_type='%s', start_date='%s', end_date='%s', monthly_payment=%s, balance=%s, org_id=%s, updated_at=NOW() WHERE id=%s" % (esc(cn), new_mid, new_amount, new_rate, new_term, new_st, new_sd.isoformat(), new_ed.isoformat(), m, new_amount, new_org if new_org else 'NULL', lid))
+
+            recalc_loan_schedule_statuses(cur, lid)
+
+            changes = []
+            if cn != old_cn:
+                changes.append('номер: %s→%s' % (old_cn, cn))
+            if new_amount != old_amount:
+                changes.append('сумма: %s→%s' % (old_amount, new_amount))
+            if new_rate != old_rate:
+                changes.append('ставка: %s%%→%s%%' % (old_rate, new_rate))
+            if new_term != old_term:
+                changes.append('срок: %s→%s мес.' % (old_term, new_term))
+            if new_st != old_st:
+                changes.append('тип: %s→%s' % (old_st, new_st))
+            if new_sd != old_sd:
+                changes.append('дата: %s→%s' % (old_sd.isoformat(), new_sd.isoformat()))
+            audit_log(cur, staff, 'update_loan', 'loan', lid, cn, 'Изменение договора: %s' % ', '.join(changes) if changes else 'Пересчёт графика', ip)
+
+            cur.execute("SELECT balance FROM loans WHERE id=%s" % lid)
+            final_balance = float(cur.fetchone()[0])
+
+            conn.commit()
+            return {'success': True, 'schedule': ns, 'monthly_payment': m, 'new_end_date': new_ed.isoformat(), 'new_balance': final_balance}
+
 def calc_savings_schedule_with_transactions(initial_amount, rate, term, start_date, payout_type, transactions, rate_changes=None):
     rc_list = []
     if rate_changes:
