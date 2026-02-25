@@ -31,7 +31,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
     term_months: "",
     schedule_type: "annuity",
     start_date: "",
-    org_id: "",
+    org_id: "none",
   });
   const [preview, setPreview] = useState<ScheduleItem[] | null>(null);
   const [previewMonthly, setPreviewMonthly] = useState(0);
@@ -46,7 +46,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
         term_months: String(detail.term_months),
         schedule_type: detail.schedule_type,
         start_date: detail.start_date,
-        org_id: detail.org_id ? String(detail.org_id) : "",
+        org_id: detail.org_id ? String(detail.org_id) : "none",
       });
       setPreview(null);
       setPreviewMonthly(0);
@@ -83,7 +83,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
         term_months: toNum(form.term_months),
         schedule_type: form.schedule_type,
         start_date: form.start_date,
-        org_id: form.org_id ? Number(form.org_id) : null,
+        org_id: form.org_id && form.org_id !== "none" ? Number(form.org_id) : null,
       });
       toast({ title: "Договор обновлён, график пересчитан" });
       onOpenChange(false);
@@ -148,7 +148,7 @@ const LoanEditDialog = ({ open, onOpenChange, detail, members, orgs, onSaved, sa
               <Select value={form.org_id} onValueChange={v => up("org_id", v)}>
                 <SelectTrigger><SelectValue placeholder="Без организации" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Без организации</SelectItem>
+                  <SelectItem value="none">Без организации</SelectItem>
                   {orgs.map(o => <SelectItem key={o.id} value={String(o.id)}>{o.short_name || o.name}</SelectItem>)}
                 </SelectContent>
               </Select>
