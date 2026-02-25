@@ -30,8 +30,8 @@ interface LoansActionDialogsProps {
 
   showModify: boolean;
   setShowModify: (v: boolean) => void;
-  modifyForm: { new_rate: string; new_term: string };
-  setModifyForm: (v: { new_rate: string; new_term: string }) => void;
+  modifyForm: { new_rate: string; new_term: string; new_amount: string; effective_date: string };
+  setModifyForm: (v: { new_rate: string; new_term: string; new_amount: string; effective_date: string }) => void;
   modifyPreview: ScheduleItem[] | null;
   modifyMonthly: number;
   handleModifyPreview: () => void;
@@ -91,20 +91,46 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
       <Dialog open={props.showModify} onOpenChange={props.setShowModify}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Изменить условия</DialogTitle></DialogHeader>
-          <div className="space-y-2">
-            <div className="text-sm text-muted-foreground">Текущая ставка: {detail ? detail.rate + "%" : "—"}, Срок: {detail ? detail.term_months + " мес." : "—"}</div>
-            <div><Label>Новая ставка (%, оставить пустым = без изменений)</Label><Input type="number" step="0.01" value={props.modifyForm.new_rate} onChange={e => props.setModifyForm({ ...props.modifyForm, new_rate: e.target.value })} /></div>
-            <div><Label>Новый срок (мес., оставить пустым = без изменений)</Label><Input type="number" value={props.modifyForm.new_term} onChange={e => props.setModifyForm({ ...props.modifyForm, new_term: e.target.value })} /></div>
-            <Button onClick={props.handleModifyPreview} disabled={!props.modifyForm.new_rate && !props.modifyForm.new_term} size="sm" className="w-full">Показать новый график</Button>
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              Текущие: сумма {detail ? fmt(detail.amount) : "—"}, остаток {detail ? fmt(detail.balance) : "—"}, ставка {detail ? detail.rate + "%" : "—"}, срок {detail ? detail.term_months + " мес." : "—"}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label>Дата изменений *</Label>
+                <Input type="date" value={props.modifyForm.effective_date} onChange={e => props.setModifyForm({ ...props.modifyForm, effective_date: e.target.value })} />
+              </div>
+              <div>
+                <Label>Новая сумма займа (доп. транш)</Label>
+                <Input type="number" placeholder={detail ? String(detail.amount) : ""} value={props.modifyForm.new_amount} onChange={e => props.setModifyForm({ ...props.modifyForm, new_amount: e.target.value })} />
+                {props.modifyForm.new_amount && detail && Number(props.modifyForm.new_amount) > detail.amount && (
+                  <div className="text-xs text-green-600 mt-1">Доп. транш: +{fmt(Number(props.modifyForm.new_amount) - detail.amount)}</div>
+                )}
+                {props.modifyForm.new_amount && detail && Number(props.modifyForm.new_amount) <= detail.amount && (
+                  <div className="text-xs text-red-500 mt-1">Сумма должна быть больше текущей ({fmt(detail.amount)})</div>
+                )}
+              </div>
+              <div>
+                <Label>Новая ставка (%)</Label>
+                <Input type="number" step="0.01" placeholder={detail ? String(detail.rate) : ""} value={props.modifyForm.new_rate} onChange={e => props.setModifyForm({ ...props.modifyForm, new_rate: e.target.value })} />
+              </div>
+              <div>
+                <Label>Новый срок (мес.)</Label>
+                <Input type="number" placeholder={detail ? String(detail.term_months) : ""} value={props.modifyForm.new_term} onChange={e => props.setModifyForm({ ...props.modifyForm, new_term: e.target.value })} />
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground">Оставьте поле пустым, чтобы сохранить текущее значение. График пересчитается с даты изменений.</div>
+            <Button onClick={props.handleModifyPreview} disabled={!props.modifyForm.effective_date || (!props.modifyForm.new_rate && !props.modifyForm.new_term && !props.modifyForm.new_amount)} size="sm" className="w-full">Показать новый график</Button>
             {props.modifyPreview && (
-              <Card className="p-3 text-sm">
-                <div className="font-medium mb-1">Новый график:</div>
-                <div>Новый платёж: {fmt(props.modifyMonthly)}</div>
+              <Card className="p-3 text-sm space-y-1">
+                <div className="font-medium">Новый график:</div>
+                <div>Ежемесячный платёж: <span className="font-bold">{fmt(props.modifyMonthly)}</span></div>
                 <div>Периодов: {props.modifyPreview.length}</div>
+                <div>Итого к выплате: {fmt(props.modifyPreview.reduce((s, i) => s + i.payment_amount, 0))}</div>
               </Card>
             )}
           </div>
-          <DialogFooter><Button onClick={props.handleModify} disabled={saving}>Изменить</Button></DialogFooter>
+          <DialogFooter><Button onClick={props.handleModify} disabled={saving || !props.modifyForm.effective_date}>Изменить и пересчитать</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

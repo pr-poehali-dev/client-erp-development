@@ -66,7 +66,7 @@ const Loans = () => {
   const [earlyForm, setEarlyForm] = useState({ amount: "", repayment_type: "reduce_term", date: new Date().toISOString().slice(0, 10) });
   const [earlyPreview, setEarlyPreview] = useState<ScheduleItem[] | null>(null);
   const [earlyMonthly, setEarlyMonthly] = useState(0);
-  const [modifyForm, setModifyForm] = useState({ new_rate: "", new_term: "" });
+  const [modifyForm, setModifyForm] = useState({ new_rate: "", new_term: "", new_amount: "", effective_date: new Date().toISOString().slice(0, 10) });
   const [modifyPreview, setModifyPreview] = useState<ScheduleItem[] | null>(null);
   const [modifyMonthly, setModifyMonthly] = useState(0);
   const [showEditPayment, setShowEditPayment] = useState(false);
@@ -200,31 +200,38 @@ const Loans = () => {
   };
 
   const handleModifyPreview = async () => {
-    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term)) return;
+    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term && !modifyForm.new_amount)) return;
     const newRate = modifyForm.new_rate ? toNum(modifyForm.new_rate) : detail.rate;
     const remainingPeriods = detail.schedule.filter(s => s.status === "pending").length;
     const newTerm = modifyForm.new_term ? toNum(modifyForm.new_term) : remainingPeriods;
-    const res = await api.loans.calcSchedule(
-      detail.balance,
-      newRate,
-      newTerm,
-      detail.schedule_type,
-      new Date().toISOString().slice(0, 10)
-    );
+    const extra = modifyForm.new_amount ? toNum(modifyForm.new_amount) - detail.amount : 0;
+    const newBalance = detail.balance + (extra > 0 ? extra : 0);
+    const effectiveDate = modifyForm.effective_date || new Date().toISOString().slice(0, 10);
+    const res = await api.loans.calcSchedule(newBalance, newRate, newTerm, detail.schedule_type, effectiveDate);
     setModifyPreview(res.schedule);
     setModifyMonthly(res.monthly_payment);
   };
 
   const handleModify = async () => {
-    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term)) return;
+    if (!detail || (!modifyForm.new_rate && !modifyForm.new_term && !modifyForm.new_amount)) return;
+    if (!modifyForm.effective_date) {
+      toast({ title: "Укажите дату изменений", variant: "destructive" });
+      return;
+    }
+    if (modifyForm.new_amount && toNum(modifyForm.new_amount) <= detail.amount) {
+      toast({ title: "Новая сумма должна быть больше текущей (" + fmt(detail.amount) + ")", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       await api.loans.modify({
         loan_id: detail.id,
         new_rate: modifyForm.new_rate ? toNum(modifyForm.new_rate) : undefined,
         new_term: modifyForm.new_term ? toNum(modifyForm.new_term) : undefined,
+        new_amount: modifyForm.new_amount ? toNum(modifyForm.new_amount) : undefined,
+        effective_date: modifyForm.effective_date,
       });
-      toast({ title: "Условия изменены" });
+      toast({ title: "Условия изменены, график пересчитан" });
       setShowModify(false);
       setModifyPreview(null);
       const d = await api.loans.get(detail.id);

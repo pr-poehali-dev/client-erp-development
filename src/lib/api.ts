@@ -54,8 +54,8 @@ export const api = {
       request<PaymentResult>("POST", undefined, { entity: "loans", action: "payment", ...data }),
     earlyRepayment: (data: { loan_id: number; amount: number; repayment_type: string; payment_date: string }) =>
       request<unknown>("POST", undefined, { entity: "loans", action: "early_repayment", ...data }),
-    modify: (data: { loan_id: number; new_rate?: number; new_term?: number }) =>
-      request<unknown>("POST", undefined, { entity: "loans", action: "modify", ...data }),
+    modify: (data: { loan_id: number; new_rate?: number; new_term?: number; new_amount?: number; effective_date?: string }) =>
+      request<{ success: boolean; new_schedule: ScheduleItem[]; monthly_payment: number; new_balance: number }>("POST", undefined, { entity: "loans", action: "modify", ...data }),
     updateLoan: (data: { loan_id: number; contract_no?: string; member_id?: number; amount?: number; rate?: number; term_months?: number; schedule_type?: string; start_date?: string; org_id?: number | null }) =>
       request<{ success: boolean; schedule: ScheduleItem[]; monthly_payment: number; new_end_date: string; new_balance: number }>("POST", undefined, { entity: "loans", action: "update_loan", ...data }),
     deleteContract: (loanId: number) =>
