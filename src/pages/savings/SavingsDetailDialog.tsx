@@ -1,8 +1,10 @@
+import { useState, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import Icon from "@/components/ui/icon";
 import DataTable, { Column } from "@/components/ui/data-table";
 import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem } from "@/lib/api";
@@ -10,6 +12,15 @@ import { SavingDetail, SavingTransaction, DailyAccrual, SavingsScheduleItem } fr
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " ₽";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
 const ttLabels: Record<string, string> = { opening: "Открытие", deposit: "Пополнение", withdrawal: "Частичное изъятие", partial_withdrawal: "Частичное изъятие", interest_payout: "Выплата %", interest_accrual: "Начисление %", term_change: "Изменение срока", rate_change: "Изменение ставки", early_close: "Досрочное закрытие", closing: "Закрытие" };
+const monthNames = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+
+interface MonthGroup {
+  key: string;
+  label: string;
+  total: number;
+  count: number;
+  items: DailyAccrual[];
+}
 
 interface SavingsDetailDialogProps {
   open: boolean;
@@ -34,8 +45,43 @@ interface SavingsDetailDialogProps {
   onEdit: () => void;
 }
 
+const groupAccrualsByMonth = (accruals: DailyAccrual[]): MonthGroup[] => {
+  const map = new Map<string, DailyAccrual[]>();
+  for (const a of accruals) {
+    const key = a.accrual_date.slice(0, 7);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(a);
+  }
+  const groups: MonthGroup[] = [];
+  for (const [key, items] of map) {
+    const [y, m] = key.split("-");
+    groups.push({
+      key,
+      label: `${monthNames[parseInt(m, 10) - 1]} ${y}`,
+      total: items.reduce((s, a) => s + a.daily_amount, 0),
+      count: items.length,
+      items: items.sort((a, b) => a.accrual_date.localeCompare(b.accrual_date)),
+    });
+  }
+  return groups.sort((a, b) => b.key.localeCompare(a.key));
+};
+
 const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
   const { open, onOpenChange, detail, isAdmin, isManager, txFilterState, setTxFilterState } = props;
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
+
+  const monthGroups = useMemo(() => detail ? groupAccrualsByMonth(detail.daily_accruals || []) : [], [detail]);
+
+  const toggleMonth = (key: string) => {
+    setExpandedMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const expandAll = () => setExpandedMonths(new Set(monthGroups.map(g => g.key)));
+  const collapseAll = () => setExpandedMonths(new Set());
 
   if (!detail) return null;
 
@@ -52,16 +98,6 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
     ) : null }
   ];
 
-  const accrCols: Column<DailyAccrual>[] = [
-    { key: "accrual_date", label: "Дата", render: (a: DailyAccrual) => fmtDate(a.accrual_date) },
-    { key: "balance", label: "Баланс", render: (a: DailyAccrual) => fmt(a.balance) },
-    { key: "rate", label: "Ставка", render: (a: DailyAccrual) => a.rate + "%" },
-    { key: "daily_amount", label: "Сумма", render: (a: DailyAccrual) => fmt(a.daily_amount) },
-    { key: "id", label: "", render: (a: DailyAccrual) => isAdmin ? (
-      <button onClick={(e) => { e.stopPropagation(); props.onDeleteAccrual(a.id); }} className="p-1 rounded hover:bg-muted text-red-600"><Icon name="Trash2" size={14} /></button>
-    ) : null },
-  ];
-
   const schCols: Column<SavingsScheduleItem>[] = [
     { key: "period_no", label: "№" },
     { key: "period_end", label: "Дата", render: (s: SavingsScheduleItem) => fmtDate(s.period_end) },
@@ -72,7 +108,6 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
   ];
 
   const filteredTx = txFilterState === "transactions" ? detail.transactions.filter(t => t.transaction_type !== "interest_accrual") : detail.transactions;
-  const visibleAccruals = txFilterState === "accruals" ? detail.daily_accruals : [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -136,7 +171,70 @@ const SavingsDetailDialog = (props: SavingsDetailDialogProps) => {
               )}
             </div>
             {txFilterState === "accruals" ? (
-              <DataTable columns={accrCols} data={visibleAccruals} />
+              <Card className="overflow-hidden">
+                {monthGroups.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">Нет данных</div>
+                ) : (
+                  <div>
+                    <div className="flex gap-2 p-2 border-b bg-muted/20">
+                      <Button size="sm" variant="ghost" className="text-xs h-7" onClick={expandAll}>
+                        <Icon name="ChevronsDown" size={12} className="mr-1" />Развернуть все
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-xs h-7" onClick={collapseAll}>
+                        <Icon name="ChevronsUp" size={12} className="mr-1" />Свернуть все
+                      </Button>
+                    </div>
+                    {monthGroups.map(group => {
+                      const isOpen = expandedMonths.has(group.key);
+                      return (
+                        <div key={group.key}>
+                          <button
+                            onClick={() => toggleMonth(group.key)}
+                            className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors border-b text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={16} className="text-muted-foreground" />
+                              <span className="font-medium">{group.label}</span>
+                              <span className="text-xs text-muted-foreground">({group.count} дн.)</span>
+                            </div>
+                            <span className="font-semibold text-green-600">{fmt(group.total)}</span>
+                          </button>
+                          {isOpen && (
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Дата</TableHead>
+                                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Баланс</TableHead>
+                                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Ставка</TableHead>
+                                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Сумма</TableHead>
+                                  {isAdmin && <TableHead className="text-xs font-semibold uppercase tracking-wider"></TableHead>}
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {group.items.map(a => (
+                                  <TableRow key={a.id} className="transition-colors">
+                                    <TableCell>{fmtDate(a.accrual_date)}</TableCell>
+                                    <TableCell>{fmt(a.balance)}</TableCell>
+                                    <TableCell>{a.rate}%</TableCell>
+                                    <TableCell>{fmt(a.daily_amount)}</TableCell>
+                                    {isAdmin && (
+                                      <TableCell>
+                                        <button onClick={(e) => { e.stopPropagation(); props.onDeleteAccrual(a.id); }} className="p-1 rounded hover:bg-muted text-red-600">
+                                          <Icon name="Trash2" size={14} />
+                                        </button>
+                                      </TableCell>
+                                    )}
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
             ) : (
               <DataTable columns={txCols} data={filteredTx} />
             )}
