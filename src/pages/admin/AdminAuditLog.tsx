@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import api, { AuditLogEntry } from "@/lib/api";
 
+const ALL = "_all";
+
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
   return new Date(d).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -26,19 +28,23 @@ const auditColumns: Column<AuditLogEntry>[] = [
   { key: "ip", label: "IP", render: (i) => <span className="text-xs">{i.ip || "—"}</span> },
 ];
 
+const toFilter = (v: string) => v === ALL ? "" : v;
+
 const AdminAuditLog = () => {
   const [items, setItems] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [filterEntity, setFilterEntity] = useState("");
-  const [filterAction, setFilterAction] = useState("");
+  const [filterEntity, setFilterEntity] = useState(ALL);
+  const [filterAction, setFilterAction] = useState(ALL);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback((p: number, entity: string, action: string) => {
     setLoading(true);
     const params: Record<string, string | number> = { limit: PAGE_SIZE, offset: p * PAGE_SIZE };
-    if (entity) params.filter_entity = entity;
-    if (action) params.filter_action = action;
+    const e = toFilter(entity);
+    const a = toFilter(action);
+    if (e) params.filter_entity = e;
+    if (a) params.filter_action = a;
     api.audit.list(params)
       .then((res) => {
         setItems(res.items);
@@ -66,7 +72,7 @@ const AdminAuditLog = () => {
           <Select value={filterEntity} onValueChange={setFilterEntity}>
             <SelectTrigger><SelectValue placeholder="Все" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Все</SelectItem>
+              <SelectItem value={ALL}>Все</SelectItem>
               <SelectItem value="member">Пайщик</SelectItem>
               <SelectItem value="loan">Займ</SelectItem>
               <SelectItem value="saving">Сбережение</SelectItem>
@@ -81,7 +87,7 @@ const AdminAuditLog = () => {
           <Select value={filterAction} onValueChange={setFilterAction}>
             <SelectTrigger><SelectValue placeholder="Все" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Все</SelectItem>
+              <SelectItem value={ALL}>Все</SelectItem>
               <SelectItem value="create">Создание</SelectItem>
               <SelectItem value="update">Изменение</SelectItem>
               <SelectItem value="delete">Удаление</SelectItem>
