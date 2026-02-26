@@ -124,7 +124,8 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
               <div><Label>Краткое наименование</Label><Input value={orgForm.short_name || ""} onChange={e => setOrgForm({ ...orgForm, short_name: e.target.value })} /></div>
               <div><Label>ИНН</Label><Input value={orgForm.inn || ""} onChange={e => setOrgForm({ ...orgForm, inn: e.target.value })} /></div>
               <div><Label>ОГРН</Label><Input value={orgForm.ogrn || ""} onChange={e => setOrgForm({ ...orgForm, ogrn: e.target.value })} /></div>
-              <div><Label>Адрес</Label><Input value={orgForm.address || ""} onChange={e => setOrgForm({ ...orgForm, address: e.target.value })} /></div>
+              <div><Label>Юридический адрес</Label><Input value={orgForm.legal_address || ""} onChange={e => setOrgForm({ ...orgForm, legal_address: e.target.value })} /></div>
+              <div><Label>Фактический адрес</Label><Input value={orgForm.actual_address || ""} onChange={e => setOrgForm({ ...orgForm, actual_address: e.target.value })} /></div>
               <div><Label>Телефон</Label><Input value={orgForm.phone || ""} onChange={e => setOrgForm({ ...orgForm, phone: e.target.value })} /></div>
               <div><Label>Email</Label><Input type="email" value={orgForm.email || ""} onChange={e => setOrgForm({ ...orgForm, email: e.target.value })} /></div>
               <div><Label>Сайт</Label><Input value={orgForm.website || ""} onChange={e => setOrgForm({ ...orgForm, website: e.target.value })} /></div>
@@ -132,11 +133,12 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
               <div><Label>WhatsApp</Label><Input value={orgForm.whatsapp || ""} onChange={e => setOrgForm({ ...orgForm, whatsapp: e.target.value })} placeholder="+79991234567" /></div>
             </div>
             <div className="space-y-3">
-              <div><Label>Директор (ФИО)</Label><Input value={orgForm.director_name || ""} onChange={e => setOrgForm({ ...orgForm, director_name: e.target.value })} /></div>
+              <div><Label>Директор (ФИО)</Label><Input value={orgForm.director_fio || ""} onChange={e => setOrgForm({ ...orgForm, director_fio: e.target.value })} /></div>
               <div><Label>Должность директора</Label><Input value={orgForm.director_position || ""} onChange={e => setOrgForm({ ...orgForm, director_position: e.target.value })} /></div>
-              <div><Label>БИК банка</Label><Input value={orgForm.bank_bik || ""} onChange={e => setOrgForm({ ...orgForm, bank_bik: e.target.value })} /></div>
-              <div><Label>Расчётный счёт</Label><Input value={orgForm.bank_account || ""} onChange={e => setOrgForm({ ...orgForm, bank_account: e.target.value })} /></div>
-              <div><Label>Корр. счёт</Label><Input value={orgForm.bank_corr_account || ""} onChange={e => setOrgForm({ ...orgForm, bank_corr_account: e.target.value })} /></div>
+              <div><Label>КПП</Label><Input value={orgForm.kpp || ""} onChange={e => setOrgForm({ ...orgForm, kpp: e.target.value })} /></div>
+              <div><Label>БИК банка</Label><Input value={orgForm.bik || ""} onChange={e => setOrgForm({ ...orgForm, bik: e.target.value })} /></div>
+              <div><Label>Расчётный счёт</Label><Input value={orgForm.rs || ""} onChange={e => setOrgForm({ ...orgForm, rs: e.target.value })} /></div>
+              <div><Label>Корр. счёт</Label><Input value={orgForm.ks || ""} onChange={e => setOrgForm({ ...orgForm, ks: e.target.value })} /></div>
               <div><Label>Наименование банка</Label><Input value={orgForm.bank_name || ""} onChange={e => setOrgForm({ ...orgForm, bank_name: e.target.value })} /></div>
               {editOrg && (
                 <div>
