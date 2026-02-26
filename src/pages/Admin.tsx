@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { StaffUser, AuditLogEntry, Member, Organization } from "@/lib/api";
+import api, { StaffUser, Member, Organization } from "@/lib/api";
 import AdminUserManagement from "./admin/AdminUserManagement";
 import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
@@ -23,11 +23,6 @@ const Admin = () => {
 
   const [members, setMembers] = useState<Member[]>([]);
   const [pwForm, setPwForm] = useState({ old_password: "", new_password: "" });
-  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
-  const [auditTotal, setAuditTotal] = useState(0);
-  const [auditPage, setAuditPage] = useState(0);
-  const [auditFilter, setAuditFilter] = useState({ entity: "", action: "" });
-  const [auditLoading, setAuditLoading] = useState(false);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [orgsLoading, setOrgsLoading] = useState(false);
 
@@ -36,18 +31,6 @@ const Admin = () => {
     Promise.all([api.users.list(), api.members.list()]).then(([u, m]) => { setUsers(u); setMembers(m); }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
-
-  const loadAudit = (page = 0) => {
-    setAuditLoading(true);
-    const params: Record<string, string | number> = { limit: 50, offset: page * 50 };
-    if (auditFilter.entity) params.filter_entity = auditFilter.entity;
-    if (auditFilter.action) params.filter_action = auditFilter.action;
-    api.audit.list(params).then((res) => {
-      setAuditLog(res.items);
-      setAuditTotal(res.total);
-      setAuditPage(page);
-    }).finally(() => setAuditLoading(false));
-  };
 
   const loadOrgs = () => {
     setOrgsLoading(true);
@@ -158,7 +141,7 @@ const Admin = () => {
         </TabsContent>
 
         <TabsContent value="audit">
-          <AdminAuditLog onLoad={loadAudit} />
+          <AdminAuditLog />
         </TabsContent>
 
         <TabsContent value="organizations">
