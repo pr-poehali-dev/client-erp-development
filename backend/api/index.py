@@ -3486,10 +3486,13 @@ def handle_cabinet(method, params, body, headers, cur):
         savings = query_rows(cur, """
             SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type, s.start_date, s.end_date,
                    s.accrued_interest, s.paid_interest, s.current_balance, s.status, s.org_id,
-                   o.name as org_name, o.short_name as org_short_name
+                   o.name as org_name, o.short_name as org_short_name,
+                   COALESCE((SELECT SUM(da.daily_amount) FROM savings_daily_accruals da WHERE da.saving_id=s.id), 0) as total_daily_accrued
             FROM savings s LEFT JOIN organizations o ON o.id=s.org_id
             WHERE s.member_id=%s ORDER BY s.created_at DESC
         """ % member_id)
+        for sv in savings:
+            sv['total_daily_accrued'] = float(sv['total_daily_accrued'])
 
         shares = query_rows(cur, """
             SELECT sa.id, sa.account_no, sa.balance, sa.total_in, sa.total_out, sa.status, sa.org_id,

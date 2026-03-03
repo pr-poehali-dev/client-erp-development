@@ -213,7 +213,13 @@ const Cabinet = () => {
             <div className="grid grid-cols-2 gap-2 sm:gap-3 text-sm">
               <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="font-medium">{fmt(s.amount)}</div></div>
               <div><div className="text-xs text-muted-foreground">Ставка</div><div className="font-medium">{s.rate}%</div></div>
-              <div><div className="text-xs text-muted-foreground">Начислено %</div><div className="font-medium text-green-600">{fmt(s.accrued_interest)}</div></div>
+              <div>
+                <div className="text-xs text-muted-foreground">Начислено %</div>
+                <div className="font-medium text-green-600">{fmt(s.total_daily_accrued || s.accrued_interest)}</div>
+                {(s.total_daily_accrued || 0) - (s.paid_interest || 0) > 0 && (
+                  <div className="text-[10px] text-amber-600">не выплачено: {fmt((s.total_daily_accrued || 0) - (s.paid_interest || 0))}</div>
+                )}
+              </div>
               <div><div className="text-xs text-muted-foreground">Баланс</div><div className="font-bold text-primary">{fmt(s.current_balance || s.amount)}</div></div>
             </div>
             <div className="text-xs text-muted-foreground mt-2">{fmtDate(s.start_date)} — {fmtDate(s.end_date)} / {s.term_months} мес. / {s.payout_type === "monthly" ? "Ежемесячно" : "В конце срока"}</div>
@@ -524,7 +530,13 @@ const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
     <div className="hidden sm:grid grid-cols-5 gap-3">
       <div><div className="text-xs text-muted-foreground">Сумма вклада</div><div className="text-sm font-medium">{fmt(saving.amount)}</div></div>
       <div><div className="text-xs text-muted-foreground">Ставка</div><div className="text-sm font-medium">{saving.rate}%</div></div>
-      <div><div className="text-xs text-muted-foreground">Начислено % (факт.)</div><div className="text-sm font-medium text-green-600">{fmt(saving.total_daily_accrued || 0)}</div></div>
+      <div>
+        <div className="text-xs text-muted-foreground">Начислено % (факт.)</div>
+        <div className="text-sm font-medium text-green-600">{fmt(saving.total_daily_accrued || 0)}</div>
+        {(saving.total_daily_accrued || 0) - (saving.paid_interest || 0) > 0 && (
+          <div className="text-[11px] text-amber-600 mt-0.5">не выплачено: {fmt((saving.total_daily_accrued || 0) - (saving.paid_interest || 0))}</div>
+        )}
+      </div>
       <div><div className="text-xs text-muted-foreground">Выплачено %</div><div className="text-sm font-medium">{fmt(saving.paid_interest)}</div></div>
       <div><div className="text-xs text-muted-foreground">Баланс</div><div className="text-sm font-bold text-primary">{fmt(saving.current_balance || saving.amount)}</div></div>
     </div>
@@ -532,6 +544,9 @@ const SavingDetailView = ({ saving }: { saving: CabinetSavingDetail }) => (
       <MobileRow label="Сумма вклада" value={fmt(saving.amount)} />
       <MobileRow label="Ставка" value={`${saving.rate}%`} />
       <MobileRow label="Начислено % (факт.)" value={fmt(saving.total_daily_accrued || 0)} className="text-green-600" />
+      {(saving.total_daily_accrued || 0) - (saving.paid_interest || 0) > 0 && (
+        <MobileRow label="⤷ не выплачено" value={fmt((saving.total_daily_accrued || 0) - (saving.paid_interest || 0))} className="text-amber-600 text-xs" />
+      )}
       <MobileRow label="Выплачено %" value={fmt(saving.paid_interest)} />
       <MobileRow label="Баланс" value={fmt(saving.current_balance || saving.amount)} className="font-bold text-primary" />
     </div>
