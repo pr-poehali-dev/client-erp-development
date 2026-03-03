@@ -436,6 +436,8 @@ export interface Saving {
   org_id?: number;
   org_name?: string;
   org_short_name?: string;
+  total_daily_accrued?: number;
+  last_accrual_date?: string;
 }
 
 export interface SavingsScheduleItem {

@@ -3487,12 +3487,15 @@ def handle_cabinet(method, params, body, headers, cur):
             SELECT s.id, s.contract_no, s.amount, s.rate, s.term_months, s.payout_type, s.start_date, s.end_date,
                    s.accrued_interest, s.paid_interest, s.current_balance, s.status, s.org_id,
                    o.name as org_name, o.short_name as org_short_name,
-                   COALESCE((SELECT SUM(da.daily_amount) FROM savings_daily_accruals da WHERE da.saving_id=s.id), 0) as total_daily_accrued
+                   COALESCE((SELECT SUM(da.daily_amount) FROM savings_daily_accruals da WHERE da.saving_id=s.id), 0) as total_daily_accrued,
+                   (SELECT MAX(da.accrual_date) FROM savings_daily_accruals da WHERE da.saving_id=s.id) as last_accrual_date
             FROM savings s LEFT JOIN organizations o ON o.id=s.org_id
             WHERE s.member_id=%s ORDER BY s.created_at DESC
         """ % member_id)
         for sv in savings:
             sv['total_daily_accrued'] = float(sv['total_daily_accrued'])
+            if sv.get('last_accrual_date'):
+                sv['last_accrual_date'] = str(sv['last_accrual_date'])
 
         shares = query_rows(cur, """
             SELECT sa.id, sa.account_no, sa.balance, sa.total_in, sa.total_out, sa.status, sa.org_id,
@@ -3528,8 +3531,10 @@ def handle_cabinet(method, params, body, headers, cur):
         if not saving:
             return {'error': 'Договор не найден'}
         saving['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % saving_id)
-        cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % saving_id)
-        saving['total_daily_accrued'] = float(cur.fetchone()[0])
+        cur.execute("SELECT COALESCE(SUM(daily_amount), 0), MAX(accrual_date) FROM savings_daily_accruals WHERE saving_id=%s" % saving_id)
+        row = cur.fetchone()
+        saving['total_daily_accrued'] = float(row[0])
+        saving['last_accrual_date'] = str(row[1]) if row[1] else None
         saving['interest_payouts'] = query_rows(cur, "SELECT id, transaction_date, amount, description FROM savings_transactions WHERE saving_id=%s AND transaction_type='interest_payout' ORDER BY transaction_date DESC" % saving_id)
         return saving
 
