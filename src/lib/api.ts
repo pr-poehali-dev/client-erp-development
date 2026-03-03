@@ -562,9 +562,17 @@ export interface AuthLoginResult {
   error?: string;
 }
 
+export interface InterestPayout {
+  id: number;
+  transaction_date: string;
+  amount: number;
+  description: string;
+}
+
 export interface CabinetSavingDetail extends Saving {
   schedule: SavingsScheduleItem[];
   total_daily_accrued: number;
+  interest_payouts: InterestPayout[];
 }
 
 export interface StaffLoginResult {

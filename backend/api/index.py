@@ -3527,6 +3527,7 @@ def handle_cabinet(method, params, body, headers, cur):
         saving['schedule'] = query_rows(cur, "SELECT * FROM savings_schedule WHERE saving_id=%s ORDER BY period_no" % saving_id)
         cur.execute("SELECT COALESCE(SUM(daily_amount), 0) FROM savings_daily_accruals WHERE saving_id=%s" % saving_id)
         saving['total_daily_accrued'] = float(cur.fetchone()[0])
+        saving['interest_payouts'] = query_rows(cur, "SELECT id, transaction_date, amount, description FROM savings_transactions WHERE saving_id=%s AND transaction_type='interest_payout' ORDER BY transaction_date DESC" % saving_id)
         return saving
 
     return {'error': 'Неизвестное действие'}
