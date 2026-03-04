@@ -1511,7 +1511,17 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 tx_by_date[td_str].append((Decimal(str(tr[1])), tr[2]))
 
             cur.execute("SELECT amount FROM savings WHERE id=%s" % sid)
-            initial_amount = Decimal(str(cur.fetchone()[0]))
+            current_amount = Decimal(str(cur.fetchone()[0]))
+
+            initial_amount = current_amount
+            for td_str in sorted(tx_by_date.keys()):
+                for amt, tt in tx_by_date[td_str]:
+                    if tt == 'deposit':
+                        initial_amount -= amt
+                    elif tt in ('withdrawal', 'partial_withdrawal'):
+                        initial_amount += amt
+            if initial_amount < 0:
+                initial_amount = Decimal('0')
 
             running_bal = initial_amount
             for td_str in sorted(tx_by_date.keys()):
@@ -1519,7 +1529,7 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                     for amt, tt in tx_by_date[td_str]:
                         if tt == 'deposit':
                             running_bal += amt
-                        elif tt == 'withdrawal':
+                        elif tt in ('withdrawal', 'partial_withdrawal'):
                             running_bal -= amt
 
             count_added = 0
@@ -1585,6 +1595,72 @@ def handle_savings(method, params, body, cur, conn, staff=None, ip=''):
                 'date_to': date_to,
                 'mode': mode,
             }
+
+        elif action == 'reset_accruals':
+            sid = int(body['saving_id'])
+            date_to = body.get('date_to', date.today().isoformat())
+            cur.execute("SELECT id, rate, start_date FROM savings WHERE id=%s" % sid)
+            sv = cur.fetchone()
+            if not sv:
+                return {'error': 'Вклад не найден'}
+            s_rate = Decimal(str(sv[1]))
+            s_start = str(sv[2])
+            s_start_date = date.fromisoformat(s_start)
+            cur.execute("SELECT effective_date, old_rate, new_rate FROM savings_rate_changes WHERE saving_id=%s ORDER BY effective_date" % sid)
+            rate_changes_rows = cur.fetchall()
+            rate_changes_list = [(date.fromisoformat(str(r[0])), Decimal(str(r[1])), Decimal(str(r[2]))) for r in rate_changes_rows]
+            original_rate = rate_changes_list[0][1] if rate_changes_list else s_rate
+            cur.execute("SELECT transaction_date, amount, transaction_type FROM savings_transactions WHERE saving_id=%s ORDER BY transaction_date, id" % sid)
+            tx_rows = cur.fetchall()
+            tx_by_date = {}
+            for tr in tx_rows:
+                td_str = str(tr[0])
+                if td_str not in tx_by_date:
+                    tx_by_date[td_str] = []
+                tx_by_date[td_str].append((Decimal(str(tr[1])), tr[2]))
+            cur.execute("SELECT amount FROM savings WHERE id=%s" % sid)
+            current_amount = Decimal(str(cur.fetchone()[0]))
+            initial_amount = current_amount
+            for td_str in sorted(tx_by_date.keys()):
+                for amt, tt in tx_by_date[td_str]:
+                    if tt == 'deposit':
+                        initial_amount -= amt
+                    elif tt in ('withdrawal', 'partial_withdrawal'):
+                        initial_amount += amt
+            if initial_amount < 0:
+                initial_amount = Decimal('0')
+            cur.execute("DELETE FROM savings_daily_accruals WHERE saving_id=%s" % sid)
+            cur.execute("DELETE FROM savings_transactions WHERE saving_id=%s AND transaction_type='interest_accrual'" % sid)
+            running_bal = initial_amount
+            d = s_start_date + timedelta(days=1)
+            d_to = date.fromisoformat(date_to)
+            total_accrued = Decimal('0')
+            count = 0
+            while d <= d_to:
+                ds = d.isoformat()
+                effective_rate = original_rate
+                for rc_d, rc_old, rc_r in rate_changes_list:
+                    if rc_d <= d:
+                        effective_rate = rc_r
+                if running_bal > 0:
+                    daily = (running_bal * effective_rate / Decimal('100') / Decimal('365')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    if daily > 0:
+                        cur.execute("INSERT INTO savings_daily_accruals (saving_id, accrual_date, balance, rate, daily_amount) VALUES (%s, '%s', %s, %s, %s)" % (sid, ds, float(running_bal), float(effective_rate), float(daily)))
+                        total_accrued += daily
+                        count += 1
+                if ds in tx_by_date:
+                    for amt, tt in tx_by_date[ds]:
+                        if tt == 'deposit':
+                            running_bal += amt
+                        elif tt in ('withdrawal', 'partial_withdrawal'):
+                            running_bal -= amt
+                d += timedelta(days=1)
+            cur.execute("UPDATE savings SET accrued_interest=%s, updated_at=NOW() WHERE id=%s" % (float(total_accrued), sid))
+            desc = 'Пересчёт начислений %s — %s: %s дн., итого %s' % (s_start, date_to, count, float(total_accrued))
+            cur.execute("INSERT INTO savings_transactions (saving_id,transaction_date,amount,transaction_type,description) VALUES (%s,'%s',%s,'interest_accrual','%s')" % (sid, date_to, float(total_accrued), esc(desc)))
+            audit_log(cur, staff, 'reset_accruals', 'saving', sid, '', desc, ip)
+            conn.commit()
+            return {'success': True, 'days': count, 'total_accrued': float(total_accrued)}
 
         elif action == 'partial_withdrawal':
             sid = int(body['saving_id'])
