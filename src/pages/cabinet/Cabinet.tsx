@@ -314,6 +314,7 @@ const Cabinet = () => {
                 <div className="text-lg font-bold truncate">{fmt(totalLoanBalance)}</div>
               </div>
             </div>
+            <div className="mt-2 text-[11px] sm:text-xs leading-tight text-red-500">Своевременный платёж — залог положительной кредитной истории</div>
           </Card>
           <Card className="p-3 sm:p-4">
             <div className="flex items-center gap-3">
@@ -323,6 +324,7 @@ const Cabinet = () => {
                 <div className="text-lg font-bold truncate">{fmt(totalSavings)}</div>
               </div>
             </div>
+            <div className="mt-2 text-[11px] sm:text-xs leading-tight text-green-600">Сбережения растут каждый день! Пополняйте — ускоряйте рост</div>
           </Card>
           <Card className="p-3 sm:p-4">
             <div className="flex items-center gap-3">
@@ -332,6 +334,7 @@ const Cabinet = () => {
                 <div className="text-lg font-bold truncate">{fmt(totalShares)}</div>
               </div>
             </div>
+            <div className="mt-2 text-[11px] sm:text-xs leading-tight text-blue-600">Увеличьте участие в фонде — повысьте доход по итогам года!</div>
           </Card>
         </div>
 
