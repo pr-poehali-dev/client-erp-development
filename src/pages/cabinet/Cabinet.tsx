@@ -412,7 +412,6 @@ const MobileRow = ({ label, value, className }: { label: string; value: string; 
 );
 
 const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
-  const [showDocs, setShowDocs] = useState(false);
   const [certFrom, setCertFrom] = useState(loan.start_date || "");
   const [certTo, setCertTo] = useState(new Date().toISOString().slice(0, 10));
   const [certLoading, setCertLoading] = useState(false);
@@ -453,6 +452,7 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
         <TabsList className="w-full flex">
           <TabsTrigger value="schedule" className="flex-1 text-xs sm:text-sm">График</TabsTrigger>
           <TabsTrigger value="payments" className="flex-1 text-xs sm:text-sm">Платежи ({loan.payments.length})</TabsTrigger>
+          <TabsTrigger value="docs" className="flex-1 text-xs sm:text-sm">Справки</TabsTrigger>
         </TabsList>
 
         <TabsContent value="schedule" className="mt-3">
@@ -542,39 +542,27 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
             </>
           )}
         </TabsContent>
-      </Tabs>
 
-      <div className="border-t pt-3">
-        <button
-          className="flex items-center gap-2 text-sm text-primary hover:underline"
-          onClick={() => setShowDocs(!showDocs)}
-        >
-          <Icon name="FileText" size={16} />
-          Справки и документы
-          <Icon name={showDocs ? "ChevronUp" : "ChevronDown"} size={14} />
-        </button>
-        {showDocs && (
-          <div className="mt-3 space-y-3">
-            <Card className="p-3 sm:p-4">
-              <div className="text-sm font-medium mb-2">Справка о выплаченных процентах за период</div>
-              <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-                <div className="flex-1">
-                  <Label className="text-xs">С</Label>
-                  <Input type="date" value={certFrom} onChange={e => setCertFrom(e.target.value)} className="h-8 text-sm" />
-                </div>
-                <div className="flex-1">
-                  <Label className="text-xs">По</Label>
-                  <Input type="date" value={certTo} onChange={e => setCertTo(e.target.value)} className="h-8 text-sm" />
-                </div>
-                <Button size="sm" onClick={downloadCertificate} disabled={certLoading} className="h-8 gap-1.5">
-                  <Icon name={certLoading ? "Loader2" : "Download"} size={14} className={certLoading ? "animate-spin" : ""} />
-                  {certLoading ? "Формирование..." : "Скачать PDF"}
-                </Button>
+        <TabsContent value="docs" className="mt-3">
+          <Card className="p-3 sm:p-4">
+            <div className="text-sm font-medium mb-2">Справка о выплаченных процентах за период</div>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+              <div className="flex-1">
+                <Label className="text-xs">С</Label>
+                <Input type="date" value={certFrom} onChange={e => setCertFrom(e.target.value)} className="h-8 text-sm" />
               </div>
-            </Card>
-          </div>
-        )}
-      </div>
+              <div className="flex-1">
+                <Label className="text-xs">По</Label>
+                <Input type="date" value={certTo} onChange={e => setCertTo(e.target.value)} className="h-8 text-sm" />
+              </div>
+              <Button size="sm" onClick={downloadCertificate} disabled={certLoading} className="h-8 gap-1.5">
+                <Icon name={certLoading ? "Loader2" : "Download"} size={14} className={certLoading ? "animate-spin" : ""} />
+                {certLoading ? "Формирование..." : "Скачать PDF"}
+              </Button>
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
