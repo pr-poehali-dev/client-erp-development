@@ -415,6 +415,7 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
   const [certFrom, setCertFrom] = useState(loan.start_date || "");
   const [certTo, setCertTo] = useState(new Date().toISOString().slice(0, 10));
   const [certLoading, setCertLoading] = useState(false);
+  const [closureLoading, setClosureLoading] = useState(false);
   const { toast } = useToast();
   const token = localStorage.getItem("cabinet_token") || "";
 
@@ -428,6 +429,18 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
       toast({ title: "Ошибка формирования справки", variant: "destructive" });
     } finally {
       setCertLoading(false);
+    }
+  };
+
+  const downloadClosure = async () => {
+    setClosureLoading(true);
+    try {
+      await api.cabinet.loanClosure(token, loan.id);
+      toast({ title: "Справка скачана" });
+    } catch {
+      toast({ title: "Ошибка формирования справки", variant: "destructive" });
+    } finally {
+      setClosureLoading(false);
     }
   };
 
@@ -543,7 +556,7 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
           )}
         </TabsContent>
 
-        <TabsContent value="docs" className="mt-3">
+        <TabsContent value="docs" className="mt-3 space-y-3">
           <Card className="p-3 sm:p-4">
             <div className="text-sm font-medium mb-2">Справка о выплаченных процентах за период</div>
             <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
@@ -561,6 +574,20 @@ const LoanDetailView = ({ loan }: { loan: LoanDetail }) => {
               </Button>
             </div>
           </Card>
+          {loan.status === "closed" && (
+            <Card className="p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">Справка о погашении займа</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Подтверждение полного погашения и закрытия договора</div>
+                </div>
+                <Button size="sm" onClick={downloadClosure} disabled={closureLoading} className="h-8 gap-1.5 shrink-0">
+                  <Icon name={closureLoading ? "Loader2" : "Download"} size={14} className={closureLoading ? "animate-spin" : ""} />
+                  {closureLoading ? "Формирование..." : "Скачать PDF"}
+                </Button>
+              </div>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

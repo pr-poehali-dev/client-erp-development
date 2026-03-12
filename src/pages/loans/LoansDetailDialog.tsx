@@ -46,6 +46,7 @@ const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
   const [certFrom, setCertFrom] = useState(loan.start_date || "");
   const [certTo, setCertTo] = useState(new Date().toISOString().slice(0, 10));
   const [certLoading, setCertLoading] = useState(false);
+  const [closureLoading, setClosureLoading] = useState(false);
   const { toast } = useToast();
 
   const downloadCertificate = async () => {
@@ -58,6 +59,18 @@ const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
       toast({ title: "Ошибка формирования справки", variant: "destructive" });
     } finally {
       setCertLoading(false);
+    }
+  };
+
+  const downloadClosure = async () => {
+    setClosureLoading(true);
+    try {
+      await api.export.download("loan_closure", loan.id, "pdf");
+      toast({ title: "Справка скачана" });
+    } catch {
+      toast({ title: "Ошибка формирования справки", variant: "destructive" });
+    } finally {
+      setClosureLoading(false);
     }
   };
 
@@ -82,6 +95,22 @@ const LoanDocumentsContent = ({ loan }: { loan: LoanDetail }) => {
           </div>
         </CardContent>
       </Card>
+      {loan.status === "closed" && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Справка о погашении займа</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Подтверждение полного погашения задолженности и закрытия договора</div>
+              </div>
+              <Button size="sm" onClick={downloadClosure} disabled={closureLoading} className="h-8 gap-1.5 shrink-0 ml-4">
+                <Icon name={closureLoading ? "Loader2" : "Download"} size={14} className={closureLoading ? "animate-spin" : ""} />
+                {closureLoading ? "Формирование..." : "Скачать PDF"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
