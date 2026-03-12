@@ -3908,6 +3908,24 @@ def handle_cabinet(method, params, body, headers, cur):
             WHERE sa.member_id=%s ORDER BY sa.created_at DESC
         """ % member_id)
 
+        active_loan_ids = [l['id'] for l in loans if l.get('status') in ('active', 'overdue')]
+        if active_loan_ids:
+            ids_str = ','.join(str(i) for i in active_loan_ids)
+            next_rows = query_rows(cur, """
+                SELECT loan_id, payment_date
+                FROM loan_schedule
+                WHERE loan_id IN (%s) AND status IN ('pending', 'overdue')
+                ORDER BY loan_id, payment_no
+            """ % ids_str)
+            next_map = {}
+            for nr in next_rows:
+                lid = nr['loan_id']
+                if lid not in next_map:
+                    next_map[lid] = str(nr['payment_date'])
+            for l in loans:
+                if l['id'] in next_map:
+                    l['next_payment_date'] = next_map[l['id']]
+
         org_ids = set()
         for item in loans + savings + shares:
             if item.get('org_id'):

@@ -19,23 +19,15 @@ const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); retu
 const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично" };
 const statusVariant = (s: string) => s === "active" || s === "paid" ? "default" : s === "overdue" ? "destructive" : "secondary";
 
-const getNextPaymentDate = (loan: Loan): { date: string; daysLeft: number; isOverdue: boolean } | null => {
-  if (loan.status !== "active" && loan.status !== "overdue") return null;
-  const start = new Date(loan.start_date);
+const getNextPaymentInfo = (loan: Loan & { next_payment_date?: string }): { date: string; daysLeft: number; isOverdue: boolean } | null => {
+  if (!loan.next_payment_date) return null;
+  const parts = loan.next_payment_date.split("-");
+  if (parts.length !== 3) return null;
+  const payDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const payDay = start.getDate();
-  let cursor = new Date(start.getFullYear(), start.getMonth() + 1, payDay);
-  const end = loan.end_date ? new Date(loan.end_date) : new Date(start.getFullYear(), start.getMonth() + loan.term_months, payDay);
-  while (cursor < today && cursor <= end) {
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, payDay);
-  }
-  if (cursor > end) return null;
-  const diff = Math.ceil((cursor.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  const dd = String(cursor.getDate()).padStart(2, "0");
-  const mm = String(cursor.getMonth() + 1).padStart(2, "0");
-  const yyyy = cursor.getFullYear();
-  return { date: `${dd}.${mm}.${yyyy}`, daysLeft: diff, isOverdue: diff < 0 };
+  const diff = Math.ceil((payDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return { date: `${parts[2]}.${parts[1]}.${parts[0]}`, daysLeft: diff, isOverdue: diff < 0 };
 };
 
 const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
@@ -200,7 +192,7 @@ const Cabinet = () => {
               <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
             </div>
             {(() => {
-              const next = getNextPaymentDate(loan);
+              const next = getNextPaymentInfo(loan);
               if (!next) return null;
               const urgent = next.daysLeft <= 3;
               const soon = next.daysLeft <= 7;
