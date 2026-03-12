@@ -169,6 +169,21 @@ export const api = {
     overview: (token: string) => request<CabinetOverview>("GET", { entity: "cabinet", action: "overview", token }),
     loanDetail: (token: string, id: number) => request<LoanDetail>("GET", { entity: "cabinet", action: "loan_detail", token, id }),
     savingDetail: (token: string, id: number) => request<CabinetSavingDetail>("GET", { entity: "cabinet", action: "saving_detail", token, id }),
+    loanCertificate: async (token: string, id: number, dateFrom: string, dateTo: string) => {
+      const res = await request<ExportResult>("GET", { entity: "cabinet", action: "loan_certificate", token, id, date_from: dateFrom, date_to: dateTo });
+      const binary = atob(res.file);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: res.content_type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
   },
 
   staffAuth: {

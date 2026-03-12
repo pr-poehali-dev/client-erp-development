@@ -2946,6 +2946,115 @@ def generate_shares_pdf(account, transactions, member_name, org=None):
     doc.build(story)
     return buf.getvalue()
 
+def generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+
+    font_r, font_b = register_cyrillic_font()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    story = []
+
+    story.extend(build_pdf_header(font_r, font_b, org))
+
+    title_style = ParagraphStyle('T', fontName=font_b, fontSize=13, spaceAfter=12, spaceBefore=8, alignment=TA_CENTER, textColor=colors.HexColor('#1a3c5e'))
+    body_style = ParagraphStyle('B', fontName=font_r, fontSize=10, leading=16, spaceAfter=6, alignment=TA_JUSTIFY)
+    body_bold = ParagraphStyle('BB', fontName=font_b, fontSize=10, leading=16, spaceAfter=6, alignment=TA_JUSTIFY)
+    footer_style = ParagraphStyle('F', fontName=font_r, fontSize=7, textColor=colors.grey)
+    small_style = ParagraphStyle('SM', fontName=font_r, fontSize=9, leading=12, textColor=colors.HexColor('#333333'))
+    line_style = ParagraphStyle('LN', fontName=font_r, fontSize=10, leading=16, spaceAfter=2)
+
+    story.append(Paragraph('СПРАВКА', title_style))
+
+    org_name = org.get('name') or org.get('short_name') or ''
+    org_inn = org.get('inn') or ''
+    member_name = ''
+    if member.get('member_type') == 'FL':
+        parts = [member.get('last_name', ''), member.get('first_name', ''), member.get('middle_name', '')]
+        member_name = ' '.join(p for p in parts if p)
+    else:
+        member_name = member.get('company_name') or ''
+
+    passport_series = member.get('passport_series') or '____'
+    passport_number = member.get('passport_number') or '______'
+    passport_issued_by = member.get('passport_issued_by') or '_________________________'
+    passport_issue_date = fmt_date(member.get('passport_issue_date')) if member.get('passport_issue_date') else '____________'
+    passport_dept_code = member.get('passport_dept_code') or '___-___'
+
+    contract_no = loan.get('contract_no') or ''
+    contract_date = fmt_date(loan.get('start_date')) if loan.get('start_date') else ''
+    period_from = fmt_date(date_from)
+    period_to = fmt_date(date_to)
+    balance = float(loan.get('balance', 0))
+
+    text = '%s ИНН %s сообщает сведения об уплате основного долга и процентов клиентом <b>%s</b> (Паспорт гражданина Российской Федерации %s %s выдан %s %s, код подразделения %s) по договору займа № <b>%s</b> от <b>%s</b> за период с <b>%s</b> по <b>%s</b>:' % (
+        org_name, org_inn, member_name,
+        passport_series, passport_number, passport_issue_date, passport_issued_by, passport_dept_code,
+        contract_no, contract_date, period_from, period_to
+    )
+    story.append(Paragraph(text, body_style))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph('Сумма оплаченного основного долга составила — <b>%s руб.</b>' % fmt_money(total_principal), line_style))
+    story.append(Spacer(1, 2))
+    story.append(Paragraph('Сумма оплаченных процентов составила — <b>%s руб.</b>' % fmt_money(total_interest), line_style))
+    story.append(Spacer(1, 2))
+    story.append(Paragraph('Сумма иных платежей (штрафы/пени) — <b>%s руб.</b>' % fmt_money(total_penalty), line_style))
+
+    story.append(Spacer(1, 4))
+    line_data = [['']]
+    line_t = Table(line_data, colWidths=[170*mm])
+    line_t.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#999999')),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    story.append(line_t)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph('Остаток задолженности на дату формирования данной справки составляет — <b>%s руб.</b>' % fmt_money(balance), body_style))
+
+    story.append(Spacer(1, 20))
+
+    req_title = ParagraphStyle('RT', fontName=font_b, fontSize=9, leading=12, spaceBefore=8, spaceAfter=4, textColor=colors.HexColor('#2e5d8a'))
+    story.append(Paragraph('Реквизиты организации', req_title))
+
+    req_items = []
+    if org_name:
+        req_items.append(['Наименование:', org_name])
+    if org_inn:
+        req_items.append(['ИНН:', org_inn])
+    if org.get('kpp'):
+        req_items.append(['КПП:', org['kpp']])
+    if org.get('ogrn'):
+        req_items.append(['ОГРН:', org['ogrn']])
+    if org.get('rs'):
+        req_items.append(['Расчётный счёт:', org['rs']])
+    if org.get('bank_name'):
+        req_items.append(['Банк:', org['bank_name']])
+    if org.get('bik'):
+        req_items.append(['БИК:', org['bik']])
+    if org.get('ks'):
+        req_items.append(['Корр. счёт:', org['ks']])
+
+    if req_items:
+        rt = Table(req_items, colWidths=[55*mm, 115*mm])
+        rt.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), font_b), ('FONTNAME', (1, 0), (1, -1), font_r),
+            ('FONTSIZE', (0, 0), (-1, -1), 8), ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#333333')),
+            ('TOPPADDING', (0, 0), (-1, -1), 1), ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(rt)
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
+    doc.build(story)
+    return buf.getvalue()
+
 def handle_export(params, cur):
     export_type = params.get('type', 'loan')
     format_ = params.get('format', 'xlsx')
@@ -3600,6 +3709,33 @@ def handle_cabinet(method, params, body, headers, cur):
         loan['schedule'] = query_rows(cur, "SELECT * FROM loan_schedule WHERE loan_id=%s ORDER BY payment_no" % loan_id)
         loan['payments'] = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s ORDER BY payment_date" % loan_id)
         return loan
+
+    elif action == 'loan_certificate':
+        loan_id = params.get('id') or body.get('id')
+        date_from = params.get('date_from') or body.get('date_from', '')
+        date_to = params.get('date_to') or body.get('date_to', '')
+        if not loan_id or not date_from or not date_to:
+            return {'error': 'Не указаны обязательные параметры'}
+        loan = query_one(cur, "SELECT * FROM loans WHERE id=%s AND member_id=%s" % (loan_id, member_id))
+        if not loan:
+            return {'error': 'Договор не найден'}
+        member = query_one(cur, "SELECT * FROM members WHERE id=%s" % member_id)
+        if not member:
+            return {'error': 'Пайщик не найден'}
+        org_id = loan.get('org_id')
+        if org_id:
+            org_row = query_one(cur, "SELECT * FROM organizations WHERE id=%s" % org_id)
+            org = org_row if org_row else load_org_settings(cur)
+        else:
+            org = load_org_settings(cur)
+        payments = query_rows(cur, "SELECT * FROM loan_payments WHERE loan_id=%s AND payment_date >= '%s' AND payment_date <= '%s' ORDER BY payment_date" % (loan_id, esc(date_from), esc(date_to)))
+        total_principal = sum(float(p.get('principal_part', 0)) for p in payments)
+        total_interest = sum(float(p.get('interest_part', 0)) for p in payments)
+        total_penalty = sum(float(p.get('penalty_part', 0)) for p in payments)
+        data = generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_principal, total_interest, total_penalty)
+        ct = 'application/pdf'
+        fn = 'certificate_%s_%s_%s.pdf' % (loan.get('contract_no', loan_id), date_from, date_to)
+        return {'file': base64.b64encode(data).decode('utf-8'), 'content_type': ct, 'filename': fn}
 
     elif action == 'saving_detail':
         saving_id = params.get('id') or body.get('id')
