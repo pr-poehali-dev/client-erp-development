@@ -110,6 +110,12 @@ const Admin = () => {
     return res;
   };
 
+  const handleUploadImage = async (orgId: number, imageType: "signature" | "stamp", base64: string, mimeType: string) => {
+    const res = await api.organizations.uploadImage(orgId, imageType, base64, mimeType);
+    toast({ title: imageType === "signature" ? "Подпись загружена" : "Печать загружена" });
+    return res;
+  };
+
   return (
     <div className="p-6 space-y-4">
       <PageHeader
@@ -153,6 +159,7 @@ const Admin = () => {
             onUpdate={handleUpdateOrg}
             onDelete={handleDeleteOrg}
             onUploadLogo={handleUploadLogo}
+            onUploadImage={handleUploadImage}
           />
         </TabsContent>
       </Tabs>

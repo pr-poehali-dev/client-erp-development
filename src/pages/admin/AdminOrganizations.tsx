@@ -15,10 +15,11 @@ interface AdminOrganizationsProps {
   onUpdate: (id: number, form: Partial<Organization>) => Promise<void>;
   onDelete: (org: Organization) => Promise<void>;
   onUploadLogo: (orgId: number, base64: string, mimeType: string) => Promise<{ logo_url: string }>;
+  onUploadImage: (orgId: number, imageType: "signature" | "stamp", base64: string, mimeType: string) => Promise<{ url: string }>;
 }
 
 const AdminOrganizations = (props: AdminOrganizationsProps) => {
-  const { orgs, loading, onLoad, onCreate, onUpdate, onDelete, onUploadLogo } = props;
+  const { orgs, loading, onLoad, onCreate, onUpdate, onDelete, onUploadLogo, onUploadImage } = props;
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [editOrg, setEditOrg] = useState<Organization | null>(null);
   const [orgForm, setOrgForm] = useState<Partial<Organization>>({});
@@ -78,6 +79,28 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
     loadOrgs();
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, imageType: "signature" | "stamp") => {
+    const file = e.target.files?.[0];
+    if (!file || !editOrg) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      const res = await onUploadImage(editOrg.id, imageType, base64, file.type);
+      const key = imageType === "signature" ? "signature_url" : "stamp_url";
+      setOrgForm(prev => ({ ...prev, [key]: res.url }));
+      loadOrgs();
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImageDelete = async (imageType: "signature" | "stamp") => {
+    if (!editOrg) return;
+    const key = imageType === "signature" ? "signature_url" : "stamp_url";
+    await onUpdate(editOrg.id, { [key]: "" } as Partial<Organization>);
+    setOrgForm(prev => ({ ...prev, [key]: "" }));
+    loadOrgs();
+  };
+
   const deleteOrg = async (org: Organization) => {
     await onDelete(org);
     loadOrgs();
@@ -130,7 +153,7 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
               <div><Label>Email</Label><Input type="email" value={orgForm.email || ""} onChange={e => setOrgForm({ ...orgForm, email: e.target.value })} /></div>
               <div><Label>Сайт</Label><Input value={orgForm.website || ""} onChange={e => setOrgForm({ ...orgForm, website: e.target.value })} /></div>
               <div><Label>Telegram</Label><Input value={orgForm.telegram || ""} onChange={e => setOrgForm({ ...orgForm, telegram: e.target.value })} placeholder="@username" /></div>
-              <div><Label>WhatsApp</Label><Input value={orgForm.whatsapp || ""} onChange={e => setOrgForm({ ...orgForm, whatsapp: e.target.value })} placeholder="+79991234567" /></div>
+              <div><Label>Max (мессенджер)</Label><Input value={orgForm.max_messenger || ""} onChange={e => setOrgForm({ ...orgForm, max_messenger: e.target.value })} placeholder="@username" /></div>
             </div>
             <div className="space-y-3">
               <div><Label>Директор (ФИО)</Label><Input value={orgForm.director_fio || ""} onChange={e => setOrgForm({ ...orgForm, director_fio: e.target.value })} /></div>
@@ -141,20 +164,50 @@ const AdminOrganizations = (props: AdminOrganizationsProps) => {
               <div><Label>Корр. счёт</Label><Input value={orgForm.ks || ""} onChange={e => setOrgForm({ ...orgForm, ks: e.target.value })} /></div>
               <div><Label>Наименование банка</Label><Input value={orgForm.bank_name || ""} onChange={e => setOrgForm({ ...orgForm, bank_name: e.target.value })} /></div>
               {editOrg && (
-                <div>
-                  <Label>Логотип</Label>
-                  <div className="flex items-center gap-2 mt-2">
-                    {orgForm.logo_url ? (
-                      <>
-                        <img src={orgForm.logo_url} alt="Логотип" className="w-16 h-16 object-contain border rounded" />
-                        <Button size="sm" variant="destructive" onClick={handleLogoDelete}><Icon name="Trash2" size={14} className="mr-1" />Удалить</Button>
-                      </>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">Логотип не загружен</div>
-                    )}
+                <>
+                  <div>
+                    <Label>Логотип</Label>
+                    <div className="flex items-center gap-2 mt-2">
+                      {orgForm.logo_url ? (
+                        <>
+                          <img src={orgForm.logo_url} alt="Логотип" className="w-16 h-16 object-contain border rounded" />
+                          <Button size="sm" variant="destructive" onClick={handleLogoDelete}><Icon name="Trash2" size={14} className="mr-1" />Удалить</Button>
+                        </>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">Не загружен</div>
+                      )}
+                    </div>
+                    <Input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoUpload} className="mt-2" />
                   </div>
-                  <Input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoUpload} className="mt-2" />
-                </div>
+                  <div>
+                    <Label>Подпись (для документов)</Label>
+                    <div className="flex items-center gap-2 mt-2">
+                      {orgForm.signature_url ? (
+                        <>
+                          <img src={orgForm.signature_url} alt="Подпись" className="h-12 object-contain border rounded bg-white p-1" />
+                          <Button size="sm" variant="destructive" onClick={() => handleImageDelete("signature")}><Icon name="Trash2" size={14} className="mr-1" />Удалить</Button>
+                        </>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">Не загружена</div>
+                      )}
+                    </div>
+                    <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleImageUpload(e, "signature")} className="mt-2" />
+                  </div>
+                  <div>
+                    <Label>Печать (для документов)</Label>
+                    <div className="flex items-center gap-2 mt-2">
+                      {orgForm.stamp_url ? (
+                        <>
+                          <img src={orgForm.stamp_url} alt="Печать" className="h-16 object-contain border rounded bg-white p-1" />
+                          <Button size="sm" variant="destructive" onClick={() => handleImageDelete("stamp")}><Icon name="Trash2" size={14} className="mr-1" />Удалить</Button>
+                        </>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">Не загружена</div>
+                      )}
+                    </div>
+                    <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleImageUpload(e, "stamp")} className="mt-2" />
+                  </div>
+                </>
               )}
             </div>
           </div>

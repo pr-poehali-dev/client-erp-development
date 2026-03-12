@@ -236,6 +236,7 @@ export const api = {
     create: (data: Partial<Organization>) => request<{ id: number }>("POST", undefined, { entity: "organizations", action: "create", ...data }),
     update: (data: Partial<Organization> & { id: number }) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "update", ...data }),
     uploadLogo: (orgId: number, logoBase64: string, contentType?: string) => request<{ success: boolean; logo_url: string }>("POST", undefined, { entity: "organizations", action: "upload_logo", id: orgId, logo: logoBase64, content_type: contentType }),
+    uploadImage: (orgId: number, imageType: "signature" | "stamp", base64: string, contentType?: string) => request<{ success: boolean; url: string }>("POST", undefined, { entity: "organizations", action: "upload_image", id: orgId, image_type: imageType, image: base64, content_type: contentType }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "organizations", action: "delete", id }),
   },
 };
@@ -723,7 +724,7 @@ export interface OrgSettings {
   website: string;
   email: string;
   telegram: string;
-  whatsapp: string;
+  max_messenger: string;
 }
 
 export interface Organization {
@@ -745,8 +746,10 @@ export interface Organization {
   email: string;
   website: string;
   telegram: string;
-  whatsapp: string;
+  max_messenger: string;
   logo_url: string | null;
+  signature_url: string | null;
+  stamp_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

@@ -2130,6 +2130,88 @@ def get_logo_path(logo_url=None):
     _logo_cache[url] = p
     return p
 
+_img_cache = {}
+
+def get_image_path(url):
+    if not url:
+        return None
+    if url in _img_cache and os.path.exists(_img_cache[url]):
+        return _img_cache[url]
+    ext = url.rsplit('.', 1)[-1] if '.' in url.split('/')[-1] else 'png'
+    h = hashlib.md5(url.encode()).hexdigest()[:10]
+    p = '/tmp/img_%s.%s' % (h, ext)
+    if not os.path.exists(p):
+        try:
+            urllib.request.urlretrieve(url, p)
+        except Exception:
+            return None
+    _img_cache[url] = p
+    return p
+
+def build_pdf_signature_block(font_r, font_b, org):
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+
+    if not org:
+        return []
+    sig_url = org.get('signature_url') or ''
+    stamp_url = org.get('stamp_url') or ''
+    director_fio = org.get('director_fio') or ''
+    director_position = org.get('director_position') or 'Директор'
+
+    if not sig_url and not stamp_url and not director_fio:
+        return []
+
+    elements = []
+    elements.append(Spacer(1, 12))
+
+    pos_style = ParagraphStyle('PS', fontName=font_r, fontSize=8, textColor=colors.HexColor('#666666'))
+    name_style = ParagraphStyle('NS', fontName=font_b, fontSize=9, textColor=colors.HexColor('#333333'))
+
+    sig_path = get_image_path(sig_url) if sig_url else None
+    stamp_path = get_image_path(stamp_url) if stamp_url else None
+
+    row_data = []
+    col_widths = []
+
+    if stamp_path:
+        stamp_img = Image(stamp_path, width=25*mm, height=25*mm)
+        row_data.append(stamp_img)
+        col_widths.append(30*mm)
+    else:
+        row_data.append('')
+        col_widths.append(5*mm)
+
+    if sig_path:
+        sig_img = Image(sig_path, width=30*mm, height=15*mm)
+        row_data.append(sig_img)
+        col_widths.append(35*mm)
+    else:
+        row_data.append('________________')
+        col_widths.append(35*mm)
+
+    fio_block = []
+    if director_position:
+        fio_block.append(Paragraph(director_position, pos_style))
+    if director_fio:
+        fio_block.append(Paragraph(director_fio, name_style))
+    from reportlab.platypus import KeepTogether
+    row_data.append(fio_block if fio_block else '')
+    col_widths.append(100*mm)
+
+    t = Table([row_data], colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(t)
+    return elements
+
 def load_org_settings(cur):
     cur.execute("SELECT key, value FROM organization_settings ORDER BY id")
     rows = cur.fetchall()
@@ -2153,10 +2235,10 @@ def build_pdf_header(font_r, font_b, org=None):
         contacts.append('Email: %s' % org['email'])
     if org.get('telegram'):
         contacts.append('Telegram: %s' % org['telegram'])
-    if org.get('whatsapp'):
-        contacts.append('WhatsApp: %s' % org['whatsapp'])
+    if org.get('max_messenger'):
+        contacts.append('Max: %s' % org['max_messenger'])
     if not contacts:
-        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
+        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161']
     contacts_line = '    '.join(contacts)
 
     logo_url = org.get('logo_url') or None
@@ -2211,10 +2293,10 @@ def build_xlsx_header(ws, org=None):
         contacts.append('Email: %s' % org['email'])
     if org.get('telegram'):
         contacts.append('Telegram: %s' % org['telegram'])
-    if org.get('whatsapp'):
-        contacts.append('WhatsApp: %s' % org['whatsapp'])
+    if org.get('max_messenger'):
+        contacts.append('Max: %s' % org['max_messenger'])
     if not contacts:
-        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161', 'WhatsApp: +79613032756']
+        contacts = ['Сайт: nfofinans.ru', 'Email: info@sll-expert.ru', 'Telegram: @nfofinans_161']
     contacts_line = '    '.join(contacts)
 
     logo_url = org.get('logo_url') or None
@@ -3050,6 +3132,8 @@ def generate_loan_certificate_pdf(loan, member, org, date_from, date_to, total_p
         ]))
         story.append(rt)
 
+    story.extend(build_pdf_signature_block(font_r, font_b, org))
+
     story.append(Spacer(1, 16))
     story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
     doc.build(story)
@@ -3135,6 +3219,8 @@ def generate_loan_closure_pdf(loan, member, org, closed_date):
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ]))
         story.append(rt)
+
+    story.extend(build_pdf_signature_block(font_r, font_b, org))
 
     story.append(Spacer(1, 16))
     story.append(Paragraph('Дата формирования: %s' % datetime.now().strftime('%d.%m.%Y %H:%M'), footer_style))
@@ -3939,7 +4025,7 @@ def handle_org_settings(method, body, staff, cur, conn):
         return {r[0]: r[1] for r in rows}
     elif method == 'POST':
         data = body.get('settings', {})
-        allowed = ('name', 'inn', 'ogrn', 'director_fio', 'bank_name', 'bik', 'rs', 'phone', 'website', 'email', 'telegram', 'whatsapp')
+        allowed = ('name', 'inn', 'ogrn', 'director_fio', 'bank_name', 'bik', 'rs', 'phone', 'website', 'email', 'telegram', 'max_messenger')
         for k, v in data.items():
             if k in allowed:
                 cur.execute("INSERT INTO organization_settings (key, value, updated_at) VALUES ('%s', '%s', NOW()) ON CONFLICT (key) DO UPDATE SET value='%s', updated_at=NOW()" % (esc(k), esc(v), esc(v)))
@@ -3963,7 +4049,7 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
                 return {'_status': 403, 'error': 'Только администратор может создавать организации'}
             cur.execute("""
                 INSERT INTO organizations (name, short_name, inn, ogrn, kpp, director_fio, director_position,
-                    legal_address, actual_address, bank_name, bik, rs, ks, phone, email, website, telegram, whatsapp, logo_url)
+                    legal_address, actual_address, bank_name, bik, rs, ks, phone, email, website, telegram, max_messenger, logo_url)
                 VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
                 RETURNING id
             """ % (
@@ -3973,7 +4059,7 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
                 esc(body.get('actual_address', '')), esc(body.get('bank_name', '')),
                 esc(body.get('bik', '')), esc(body.get('rs', '')), esc(body.get('ks', '')),
                 esc(body.get('phone', '')), esc(body.get('email', '')), esc(body.get('website', '')),
-                esc(body.get('telegram', '')), esc(body.get('whatsapp', '')), esc(body.get('logo_url', ''))
+                esc(body.get('telegram', '')), esc(body.get('max_messenger', '')), esc(body.get('logo_url', ''))
             ))
             org_id = cur.fetchone()[0]
             audit_log(cur, staff, 'create', 'organization', org_id, esc(body.get('name', '')), '', ip)
@@ -3989,7 +4075,8 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
             fields = []
             allowed = ('name', 'short_name', 'inn', 'ogrn', 'kpp', 'director_fio', 'director_position',
                         'legal_address', 'actual_address', 'bank_name', 'bik', 'rs', 'ks',
-                        'phone', 'email', 'website', 'telegram', 'whatsapp', 'logo_url')
+                        'phone', 'email', 'website', 'telegram', 'max_messenger', 'logo_url',
+                        'signature_url', 'stamp_url')
             for k in allowed:
                 if k in body:
                     fields.append("%s='%s'" % (k, esc(body[k])))
@@ -4029,6 +4116,38 @@ def handle_organizations(method, params, body, staff, cur, conn, ip=''):
             audit_log(cur, staff, 'upload_logo', 'organization', org_id, '', '', ip)
             conn.commit()
             return {'success': True, 'logo_url': cdn_url}
+
+        elif action == 'upload_image':
+            if staff.get('role') != 'admin':
+                return {'_status': 403, 'error': 'Недостаточно прав'}
+            org_id = body.get('id')
+            image_type = body.get('image_type')
+            if not org_id or image_type not in ('signature', 'stamp'):
+                return {'error': 'Не указан id или тип изображения'}
+            img_b64 = body.get('image')
+            if not img_b64:
+                return {'error': 'Не передано изображение'}
+            allowed_types = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp'}
+            ct = body.get('content_type', 'image/png')
+            if ct not in allowed_types:
+                return {'_status': 400, 'error': 'Допустимы: PNG, JPEG, WebP'}
+            import boto3
+            img_data = base64.b64decode(img_b64)
+            if len(img_data) > 2 * 1024 * 1024:
+                return {'_status': 400, 'error': 'Файл слишком большой. Максимум 2 МБ'}
+            ext = allowed_types[ct]
+            s3 = boto3.client('s3',
+                endpoint_url='https://bucket.poehali.dev',
+                aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+                aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'])
+            s3_key = 'org_%s/%s.%s' % (image_type, org_id, ext)
+            s3.put_object(Bucket='files', Key=s3_key, Body=img_data, ContentType=ct)
+            cdn_url = 'https://cdn.poehali.dev/projects/%s/bucket/%s' % (os.environ['AWS_ACCESS_KEY_ID'], s3_key)
+            col = 'signature_url' if image_type == 'signature' else 'stamp_url'
+            cur.execute("UPDATE organizations SET %s='%s', updated_at=NOW() WHERE id=%s" % (col, esc(cdn_url), org_id))
+            audit_log(cur, staff, 'upload_%s' % image_type, 'organization', org_id, '', '', ip)
+            conn.commit()
+            return {'success': True, 'url': cdn_url}
 
         elif action == 'delete':
             if staff.get('role') != 'admin':
