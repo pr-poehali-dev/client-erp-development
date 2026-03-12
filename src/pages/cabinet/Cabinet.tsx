@@ -19,6 +19,25 @@ const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); retu
 const statusLabel: Record<string, string> = { active: "Активен", overdue: "Просрочен", closed: "Закрыт", pending: "Ожидается", paid: "Оплачен", partial: "Частично" };
 const statusVariant = (s: string) => s === "active" || s === "paid" ? "default" : s === "overdue" ? "destructive" : "secondary";
 
+const getNextPaymentDate = (loan: Loan): { date: string; daysLeft: number; isOverdue: boolean } | null => {
+  if (loan.status !== "active" && loan.status !== "overdue") return null;
+  const start = new Date(loan.start_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const payDay = start.getDate();
+  let cursor = new Date(start.getFullYear(), start.getMonth() + 1, payDay);
+  const end = loan.end_date ? new Date(loan.end_date) : new Date(start.getFullYear(), start.getMonth() + loan.term_months, payDay);
+  while (cursor < today && cursor <= end) {
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, payDay);
+  }
+  if (cursor > end) return null;
+  const diff = Math.ceil((cursor.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const dd = String(cursor.getDate()).padStart(2, "0");
+  const mm = String(cursor.getMonth() + 1).padStart(2, "0");
+  const yyyy = cursor.getFullYear();
+  return { date: `${dd}.${mm}.${yyyy}`, daysLeft: diff, isOverdue: diff < 0 };
+};
+
 const PaymentQR = ({ org, payerName, contractNo, sum, label }: {
   org: CabinetOrgInfo | undefined;
   payerName: string;
@@ -180,6 +199,27 @@ const Cabinet = () => {
               <div><div className="text-xs text-muted-foreground">Платёж</div><div className="font-medium">{fmt(loan.monthly_payment)}</div></div>
               <div><div className="text-xs text-muted-foreground">Остаток</div><div className="font-bold text-primary">{fmt(loan.balance)}</div></div>
             </div>
+            {(() => {
+              const next = getNextPaymentDate(loan);
+              if (!next) return null;
+              const urgent = next.daysLeft <= 3;
+              const soon = next.daysLeft <= 7;
+              return (
+                <div className={`mt-3 px-3 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${
+                  urgent
+                    ? "bg-red-50 text-red-600 border border-red-200 animate-pulse"
+                    : soon
+                      ? "bg-orange-50 text-orange-600 border border-orange-200"
+                      : "bg-blue-50 text-blue-600 border border-blue-200"
+                }`}>
+                  <Icon name={urgent ? "AlertTriangle" : "Calendar"} size={16} className="shrink-0" />
+                  <span>Оплатить до <span className="font-bold">{next.date}</span></span>
+                  {next.daysLeft === 0 && <span className="text-xs ml-auto">(сегодня!)</span>}
+                  {next.daysLeft === 1 && <span className="text-xs ml-auto">(завтра)</span>}
+                  {next.daysLeft > 1 && next.daysLeft <= 7 && <span className="text-xs ml-auto">({next.daysLeft} дн.)</span>}
+                </div>
+              );
+            })()}
             <div className="text-xs text-muted-foreground mt-2">{fmtDate(loan.start_date)} — {fmtDate(loan.end_date)} / {loan.term_months} мес.</div>
           </div>
           {(loan.status === "active" || loan.status === "overdue") && loan.org_id && (
