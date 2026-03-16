@@ -93,13 +93,13 @@ const Cabinet = () => {
   const token = localStorage.getItem("cabinet_token") || "";
 
   useEffect(() => {
-    if (!token) { navigate("/cabinet/login"); return; }
+    if (!token) { navigate("/"); return; }
     const user = localStorage.getItem("cabinet_user");
     if (user) { try { setUserName(JSON.parse(user).name); } catch { /* skip */ } }
     api.cabinet.overview(token).then(setData).catch(() => {
       localStorage.removeItem("cabinet_token");
       localStorage.removeItem("cabinet_user");
-      navigate("/cabinet/login");
+      navigate("/");
     }).finally(() => setLoading(false));
   }, [token, navigate]);
 
@@ -107,7 +107,7 @@ const Cabinet = () => {
     await api.auth.logout(token);
     localStorage.removeItem("cabinet_token");
     localStorage.removeItem("cabinet_user");
-    navigate("/cabinet/login");
+    navigate("/");
   };
 
   const openLoan = async (loan: Loan) => {

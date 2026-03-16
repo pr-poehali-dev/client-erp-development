@@ -5,13 +5,13 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const allMenuItems = [
-  { icon: "LayoutDashboard", label: "Дашборд", path: "/", roles: ["admin", "manager"] },
-  { icon: "Users", label: "Пайщики", path: "/members", roles: ["admin", "manager"] },
-  { icon: "Landmark", label: "Займы", path: "/loans", roles: ["admin", "manager"] },
-  { icon: "PiggyBank", label: "Сбережения", path: "/savings", roles: ["admin", "manager"] },
-  { icon: "Wallet", label: "Паевые счета", path: "/shares", roles: ["admin", "manager"] },
-  { icon: "BarChart3", label: "Отчётность", path: "/reports", roles: ["admin", "manager"] },
-  { icon: "Settings", label: "Администрирование", path: "/admin", roles: ["admin"] },
+  { icon: "LayoutDashboard", label: "Дашборд", path: "/office", roles: ["admin", "manager"] },
+  { icon: "Users", label: "Пайщики", path: "/office/members", roles: ["admin", "manager"] },
+  { icon: "Landmark", label: "Займы", path: "/office/loans", roles: ["admin", "manager"] },
+  { icon: "PiggyBank", label: "Сбережения", path: "/office/savings", roles: ["admin", "manager"] },
+  { icon: "Wallet", label: "Паевые счета", path: "/office/shares", roles: ["admin", "manager"] },
+  { icon: "BarChart3", label: "Отчётность", path: "/office/reports", roles: ["admin", "manager"] },
+  { icon: "Settings", label: "Администрирование", path: "/office/admin", roles: ["admin"] },
 ];
 
 const roleLabels: Record<string, string> = { admin: "Администратор", manager: "Менеджер" };
@@ -26,7 +26,7 @@ const Sidebar = () => {
 
   const handleLogout = async () => {
     await logout();
-    navigate("/login");
+    navigate("/office/login");
   };
 
   return (
@@ -51,7 +51,7 @@ const Sidebar = () => {
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto scrollbar-thin">
         {menuItems.map((item) => {
           const isActive = location.pathname === item.path ||
-            (item.path !== "/" && location.pathname.startsWith(item.path));
+            (item.path !== "/office" && location.pathname.startsWith(item.path));
           return (
             <button
               key={item.path}
@@ -78,7 +78,7 @@ const Sidebar = () => {
           </div>
         )}
         <button
-          onClick={() => navigate("/cabinet/login")}
+          onClick={() => navigate("/")}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent text-sm transition-all"
         >
           <Icon name="ExternalLink" size={18} className="flex-shrink-0" />

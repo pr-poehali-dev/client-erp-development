@@ -23,7 +23,7 @@ const Login = () => {
     setLoading(true);
     try {
       await login(loginVal, password);
-      navigate("/");
+      navigate("/office");
     } catch (err) {
       toast({ title: "Ошибка входа", description: String(err).replace("Error: ", ""), variant: "destructive" });
     } finally {
@@ -79,7 +79,7 @@ const Login = () => {
             </Button>
           </form>
           <div className="mt-4 text-center">
-            <a href="/cabinet/login" className="text-xs text-muted-foreground hover:text-primary transition-colors">
+            <a href="/" className="text-xs text-muted-foreground hover:text-primary transition-colors">
               Личный кабинет клиента
             </a>
           </div>

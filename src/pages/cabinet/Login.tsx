@@ -302,7 +302,7 @@ const Login = () => {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          <a href="/" className="hover:underline">Перейти в систему управления</a>
+          <a href="/office/login" className="hover:underline">Вход для сотрудников</a>
         </p>
 
         {orgs.length > 0 && (

@@ -23,8 +23,8 @@ const queryClient = new QueryClient();
 const ProtectedRoute = ({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) => {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Icon name="Loader2" size={32} className="animate-spin text-muted-foreground" /></div>;
-  if (!user) return <Navigate to="/login" replace />;
-  if (adminOnly && user.role !== "admin") return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/office/login" replace />;
+  if (adminOnly && user.role !== "admin") return <Navigate to="/office" replace />;
   return <>{children}</>;
 };
 
@@ -34,17 +34,17 @@ const AppRoutes = () => {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/cabinet/login" element={<CabinetLogin />} />
+      <Route path="/" element={<CabinetLogin />} />
       <Route path="/cabinet" element={<Cabinet />} />
+      <Route path="/office/login" element={user ? <Navigate to="/office" replace /> : <Login />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/members" element={<Members />} />
-        <Route path="/loans" element={<Loans />} />
-        <Route path="/savings" element={<Savings />} />
-        <Route path="/shares" element={<Shares />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
+        <Route path="/office" element={<Dashboard />} />
+        <Route path="/office/members" element={<Members />} />
+        <Route path="/office/loans" element={<Loans />} />
+        <Route path="/office/savings" element={<Savings />} />
+        <Route path="/office/shares" element={<Shares />} />
+        <Route path="/office/reports" element={<Reports />} />
+        <Route path="/office/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>
