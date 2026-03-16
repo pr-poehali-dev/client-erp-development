@@ -301,9 +301,10 @@ const Login = () => {
           </CardContent>
         </Card>
 
-        <p className="text-center text-xs text-muted-foreground mt-6">
-          <a href="/office/login" className="hover:underline">Вход для сотрудников</a>
-        </p>
+        <div className="text-center text-xs text-muted-foreground mt-6 space-y-2">
+          <p>По техническим вопросам: <a href="tel:88007008909" className="font-medium text-foreground hover:underline">8 800 700-89-09</a> <span className="text-muted-foreground/70">(звонок бесплатный)</span></p>
+          <p><a href="/office/login" className="hover:underline">Вход для сотрудников</a></p>
+        </div>
 
         {orgs.length > 0 && (
           <div className="mt-8 text-center space-y-2">
