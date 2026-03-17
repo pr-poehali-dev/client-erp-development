@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem, InterestPayout, SavingTransaction } from "@/lib/api";
+import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem, InterestPayout, SavingTransaction, PushClientMessage } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
 import usePush from "@/hooks/use-push";
@@ -87,6 +87,9 @@ const Cabinet = () => {
   const [showSaving, setShowSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showMessages, setShowMessages] = useState(false);
+  const [messages, setMessages] = useState<PushClientMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [pwForm, setPwForm] = useState({ old: "", new_pw: "", confirm: "" });
   const [savingPw, setSavingPw] = useState(false);
   const { toast } = useToast();
@@ -111,6 +114,16 @@ const Cabinet = () => {
     localStorage.removeItem("cabinet_token");
     localStorage.removeItem("cabinet_user");
     navigate("/");
+  };
+
+  const openMessages = async () => {
+    setShowMessages(true);
+    setMessagesLoading(true);
+    try {
+      const msgs = await api.push.myMessages(token);
+      setMessages(msgs);
+    } catch (e) { void e; }
+    setMessagesLoading(false);
   };
 
   const openLoan = async (loan: Loan) => {
@@ -319,9 +332,14 @@ const Cabinet = () => {
               <div className="text-xs text-muted-foreground">{data.info.member_no}</div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setShowMenu(true)}>
-            <Icon name="Settings" size={18} />
-          </Button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={openMessages}>
+              <Icon name="Bell" size={18} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setShowMenu(true)}>
+              <Icon name="Settings" size={18} />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -395,6 +413,52 @@ const Cabinet = () => {
         <DialogContent className="max-w-3xl w-[calc(100vw-1rem)] sm:w-auto max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader><DialogTitle className="text-base sm:text-lg">Договор {savingDetail?.contract_no}</DialogTitle></DialogHeader>
           {savingDetail && <SavingDetailView saving={savingDetail} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMessages} onOpenChange={setShowMessages}>
+        <DialogContent className="max-w-md w-[calc(100vw-1rem)] sm:w-auto max-h-[85vh] flex flex-col p-0">
+          <DialogHeader className="p-4 pb-2 border-b shrink-0">
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Icon name="Bell" size={18} />
+              Уведомления
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto p-4">
+            {messagesLoading ? (
+              <div className="flex justify-center py-8"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
+            ) : messages.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground text-sm">Уведомлений пока нет</div>
+            ) : (
+              <div className="space-y-3">
+                {messages.map((m, i) => {
+                  const prev = messages[i - 1];
+                  const curDate = m.sent_at ? m.sent_at.split("T")[0] : "";
+                  const prevDate = prev?.sent_at ? prev.sent_at.split("T")[0] : "";
+                  const showDate = curDate !== prevDate;
+                  const dateLabel = curDate ? new Date(curDate).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
+                  return (
+                    <div key={`${m.id}-${i}`}>
+                      {showDate && (
+                        <div className="flex items-center gap-2 my-3">
+                          <div className="flex-1 h-px bg-border" />
+                          <span className="text-[11px] text-muted-foreground shrink-0">{dateLabel}</span>
+                          <div className="flex-1 h-px bg-border" />
+                        </div>
+                      )}
+                      <div className="bg-primary/5 border border-primary/10 rounded-xl px-3.5 py-2.5 max-w-[90%]">
+                        <div className="font-medium text-sm">{m.title}</div>
+                        <div className="text-sm text-muted-foreground mt-0.5 whitespace-pre-wrap">{m.body}</div>
+                        <div className="text-[10px] text-muted-foreground/60 mt-1.5 text-right">
+                          {m.sent_at ? new Date(m.sent_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : ""}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

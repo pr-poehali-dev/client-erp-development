@@ -4274,6 +4274,31 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
         cnt = cur.fetchone()[0]
         return {'subscribed': cnt > 0}
 
+    if action == 'my_messages':
+        token = body.get('token') or params.get('token', '')
+        if not token:
+            return {'error': 'Требуется токен'}
+        cur.execute("SELECT u.id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at>NOW()" % token.replace("'", "''"))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Недействительная сессия', '_status': 401}
+        user_id = row[0]
+        cur.execute("""
+            SELECT pm.id, pm.title, pm.body, pm.url, pm.sent_at, pml.status as delivery_status
+            FROM push_message_log pml
+            JOIN push_messages pm ON pm.id = pml.message_id
+            WHERE pml.user_id = %d AND pm.status = 'sent'
+            ORDER BY pm.sent_at DESC
+            LIMIT 50
+        """ % user_id)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+        return rows
+
     if not staff:
         return {'error': 'Требуется авторизация', '_status': 401}
 

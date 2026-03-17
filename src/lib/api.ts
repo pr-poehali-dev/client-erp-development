@@ -245,6 +245,7 @@ export const api = {
     send: (data: { title: string; body: string; url?: string; target?: string; target_user_ids?: number[] }) =>
       request<{ success: boolean; message_id: number; sent: number; failed: number }>("POST", undefined, { entity: "push", action: "send", ...data }),
     messageLog: (id: number) => request<PushMessageLogEntry[]>("GET", { entity: "push", action: "message_log", id }),
+    myMessages: (token: string) => request<PushClientMessage[]>("POST", undefined, { entity: "push", action: "my_messages", token }),
     getSettings: () => request<PushSettings>("GET", { entity: "push", action: "get_settings" }),
     saveSettings: (settings: Partial<PushSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "push", action: "save_settings", settings }),
   },
@@ -834,6 +835,15 @@ export interface PushMessageLogEntry {
   status: string;
   error_text: string | null;
   created_at: string;
+}
+
+export interface PushClientMessage {
+  id: number;
+  title: string;
+  body: string;
+  url: string;
+  sent_at: string;
+  delivery_status: string;
 }
 
 export interface PushSettings {
