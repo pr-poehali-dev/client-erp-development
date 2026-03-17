@@ -271,6 +271,8 @@ export const api = {
     setWebhook: (webhookUrl?: string) => request<{ success: boolean; webhook_url: string }>("POST", undefined, { entity: "notifications", action: "set_webhook", webhook_url: webhookUrl }),
     deleteWebhook: () => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "delete_webhook" }),
     webhookInfo: () => request<{ url: string; has_custom_certificate: boolean; pending_update_count: number; last_error_date?: number; last_error_message?: string }>("POST", undefined, { entity: "notifications", action: "webhook_info" }),
+    getTelegramSettings: () => request<Record<string, string>>("GET", { entity: "notifications", action: "get_telegram_settings" }),
+    saveTelegramSettings: (settings: Record<string, string>) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_telegram_settings", settings }),
   },
 
   organizations: {

@@ -56,16 +56,19 @@ const AdminTelegramTab = () => {
   const [webhookPending, setWebhookPending] = useState(0);
   const [webhookError, setWebhookError] = useState("");
   const [webhookLoading, setWebhookLoading] = useState(false);
+  const [autoSettings, setAutoSettings] = useState<Record<string, string>>({});
+  const [savingAuto, setSavingAuto] = useState(false);
   const { toast } = useToast();
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [channels, subs, st, hist] = await Promise.all([
+      const [channels, subs, st, hist, tgSettings] = await Promise.all([
         api.notifications.channels(),
         api.notifications.telegramSubscribers(),
         api.notifications.stats(),
         api.notifications.history("telegram", 50, 0),
+        api.notifications.getTelegramSettings(),
       ]);
       const tgChannel = channels.find(c => c.channel === "telegram");
       setChannel(tgChannel || null);
@@ -78,6 +81,7 @@ const AdminTelegramTab = () => {
       setStats(st);
       setMessages(hist.items);
       setMessagesTotal(hist.total);
+      setAutoSettings(tgSettings);
     } catch (e) {
       toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
     }
@@ -94,6 +98,23 @@ const AdminTelegramTab = () => {
   };
 
   useEffect(() => { loadData(); loadWebhookInfo(); }, []);
+
+  const handleSaveAutoSettings = async () => {
+    setSavingAuto(true);
+    try {
+      await api.notifications.saveTelegramSettings(autoSettings);
+      toast({ title: "Настройки автоуведомлений сохранены" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+    setSavingAuto(false);
+  };
+
+  const toggleAutoDay = (field: string, day: string) => {
+    const current = (autoSettings[field] || "").split(",").map(d => d.trim()).filter(Boolean);
+    const updated = current.includes(day) ? current.filter(d => d !== day) : [...current, day].sort((a, b) => Number(b) - Number(a));
+    setAutoSettings(prev => ({ ...prev, [field]: updated.join(",") }));
+  };
 
   const handleSend = async () => {
     if (!form.body.trim()) {
@@ -226,6 +247,7 @@ const AdminTelegramTab = () => {
           <TabsTrigger value="send">Отправить</TabsTrigger>
           <TabsTrigger value="history">История ({messagesTotal})</TabsTrigger>
           <TabsTrigger value="subscribers">Подписчики ({subscribers.length})</TabsTrigger>
+          <TabsTrigger value="auto">Авто</TabsTrigger>
           <TabsTrigger value="settings">Настройки</TabsTrigger>
         </TabsList>
 
@@ -351,6 +373,84 @@ const AdminTelegramTab = () => {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="auto" className="mt-4">
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Icon name="CalendarClock" size={18} />
+                    Напоминания о платежах по займам
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-normal text-muted-foreground">{autoSettings.enabled === "true" ? "Вкл" : "Выкл"}</span>
+                    <Switch checked={autoSettings.enabled === "true"} onCheckedChange={v => setAutoSettings(prev => ({ ...prev, enabled: v ? "true" : "false" }))} />
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="text-sm">За сколько дней напоминать</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Пайщик получит сообщение в Telegram за выбранное количество дней до даты платежа</p>
+                  <div className="flex flex-wrap gap-2">
+                    {["7", "5", "3", "2", "1", "0"].map(d => {
+                      const active = (autoSettings.reminder_days || "").split(",").map(s => s.trim()).includes(d);
+                      return (
+                        <Button key={d} variant={active ? "default" : "outline"} size="sm" onClick={() => toggleAutoDay("reminder_days", d)} className="min-w-[70px]">
+                          {d === "0" ? "В день" : `${d} дн.`}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <div>
+                    <Label className="text-sm">Уведомления о просрочке</Label>
+                    <p className="text-xs text-muted-foreground">Отправлять сообщение, если платёж просрочен</p>
+                  </div>
+                  <Switch checked={autoSettings.overdue_notify === "true"} onCheckedChange={v => setAutoSettings(prev => ({ ...prev, overdue_notify: v ? "true" : "false" }))} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Icon name="PiggyBank" size={18} />
+                    Напоминания об окончании сбережений
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-normal text-muted-foreground">{autoSettings.savings_enabled === "true" ? "Вкл" : "Выкл"}</span>
+                    <Switch checked={autoSettings.savings_enabled === "true"} onCheckedChange={v => setAutoSettings(prev => ({ ...prev, savings_enabled: v ? "true" : "false" }))} />
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div>
+                  <Label className="text-sm">За сколько дней напоминать</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Пайщик получит сообщение о приближении даты закрытия сберегательного договора</p>
+                  <div className="flex flex-wrap gap-2">
+                    {["30", "15", "7", "3", "1", "0"].map(d => {
+                      const active = (autoSettings.savings_reminder_days || "").split(",").map(s => s.trim()).includes(d);
+                      return (
+                        <Button key={d} variant={active ? "default" : "outline"} size="sm" onClick={() => toggleAutoDay("savings_reminder_days", d)} className="min-w-[70px]">
+                          {d === "0" ? "В день" : `${d} дн.`}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Button onClick={handleSaveAutoSettings} disabled={savingAuto}>
+              {savingAuto && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
+              Сохранить настройки
+            </Button>
+          </div>
         </TabsContent>
 
         <TabsContent value="settings" className="mt-4">

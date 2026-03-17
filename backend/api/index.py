@@ -4768,6 +4768,26 @@ def handle_notifications(method, params, body, staff, cur, conn):
         except Exception as e:
             return {'error': 'Ошибка: %s' % str(e)}
 
+    if action == 'get_telegram_settings':
+        cur.execute("SELECT key, value FROM telegram_settings")
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    if action == 'save_telegram_settings':
+        settings = body.get('settings', {})
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'savings_enabled', 'savings_reminder_days'}
+        for k, v in settings.items():
+            if k not in allowed:
+                continue
+            val = str(v).replace("'", "''")
+            cur.execute("SELECT id FROM telegram_settings WHERE key='%s'" % k)
+            if cur.fetchone():
+                cur.execute("UPDATE telegram_settings SET value='%s', updated_at=NOW() WHERE key='%s'" % (val, k))
+            else:
+                cur.execute("INSERT INTO telegram_settings (key, value) VALUES ('%s', '%s')" % (k, val))
+        conn.commit()
+        return {'success': True}
+
     if action == 'set_webhook':
         bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
         if not bot_token:

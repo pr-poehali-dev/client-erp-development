@@ -1,6 +1,7 @@
 import json
 import os
 import psycopg2
+import urllib.request
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -55,6 +56,8 @@ def handler(event, context):
         penalty_result = accrue_penalties(cur, accrual_date)
         push_result = send_payment_reminders(cur, conn, accrual_date)
         savings_push_result = send_savings_reminders(cur, conn, accrual_date)
+        tg_result = send_telegram_payment_reminders(cur, conn, accrual_date)
+        tg_savings_result = send_telegram_savings_reminders(cur, conn, accrual_date)
 
         conn.commit()
 
@@ -67,7 +70,9 @@ def handler(event, context):
             'overdue': overdue_result,
             'penalties': penalty_result,
             'push_reminders': push_result,
-            'savings_push_reminders': savings_push_result
+            'savings_push_reminders': savings_push_result,
+            'telegram_reminders': tg_result,
+            'telegram_savings_reminders': tg_savings_result
         }
         return {'statusCode': 200, 'headers': headers, 'body': json.dumps(result)}
 
@@ -409,6 +414,226 @@ def send_savings_reminders(cur, conn, check_date):
                 if sub_sent:
                     cur.execute("""
                         INSERT INTO push_auto_log (loan_id, schedule_id, user_id, reminder_type)
+                        VALUES (%d, 0, %d, '%s')
+                        ON CONFLICT DO NOTHING
+                    """ % (s_id, user_id, rtype))
+
+    return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}
+
+
+def get_telegram_settings(cur):
+    try:
+        cur.execute("SELECT key, value FROM telegram_settings")
+        return {r[0]: r[1] for r in cur.fetchall()}
+    except Exception:
+        return {'enabled': 'false', 'reminder_days': '3,1,0', 'overdue_notify': 'true', 'savings_enabled': 'false', 'savings_reminder_days': '30,15,7'}
+
+
+def get_bot_token(cur):
+    token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    if not token:
+        try:
+            cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+            row = cur.fetchone()
+            if row:
+                ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                token = ch.get('bot_token', '')
+        except Exception:
+            pass
+    return token
+
+
+def send_tg_message(bot_token, chat_id, text):
+    url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
+    data = json.dumps({'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    resp = urllib.request.urlopen(req, timeout=10)
+    resp.read()
+
+
+def send_telegram_payment_reminders(cur, conn, check_date):
+    settings = get_telegram_settings(cur)
+
+    if settings.get('enabled', 'false') != 'true':
+        return {'skipped': True, 'reason': 'Telegram reminders disabled'}
+
+    bot_token = get_bot_token(cur)
+    if not bot_token:
+        return {'skipped': True, 'reason': 'Bot token not configured'}
+
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
+
+    reminder_days_str = settings.get('reminder_days', '3,1,0')
+    reminder_days = []
+    for d in reminder_days_str.split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
+
+    reminders = []
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            reminders.append(('tg_reminder_today', target_date, 'pending',
+                'Сегодня дата платежа по займу <b>%s</b>.\nСумма: <b>%s</b> руб.'))
+        elif days == 1:
+            reminders.append(('tg_reminder_1d', target_date, 'pending',
+                'До даты платежа по займу <b>%s</b> остался <b>1 день</b>.\nСумма: <b>%s</b> руб.'))
+        else:
+            reminders.append(('tg_reminder_%dd' % days, target_date, 'pending',
+                'До даты платежа по займу <b>%%s</b> осталось <b>%d дн.</b>\nСумма: <b>%%s</b> руб.' % days))
+
+    if overdue_enabled:
+        reminders.append(('tg_overdue_1d', today_str, 'overdue',
+            'Платёж по займу <b>%s</b> просрочен.\nСумма: <b>%s</b> руб.\n\nВо избежание пени оплатите как можно скорее.'))
+
+    sent_total = 0
+    failed_total = 0
+    errors = []
+
+    for rtype, target_date, sched_status, body_tpl in reminders:
+        cur.execute("""
+            SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
+            FROM loan_schedule ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE ls.payment_date = '%s'
+              AND ls.status = '%s'
+              AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
+        """ % (target_date, sched_status))
+        schedules = cur.fetchall()
+
+        for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:
+            cur.execute("""
+                SELECT u.id FROM users u
+                WHERE u.member_id = %d AND u.role = 'client' AND u.status = 'active'
+            """ % member_id)
+            user_rows = cur.fetchall()
+
+            for (user_id,) in user_rows:
+                cur.execute("""
+                    SELECT id FROM telegram_auto_log
+                    WHERE loan_id=%d AND schedule_id=%d AND user_id=%d AND reminder_type='%s'
+                """ % (loan_id, ls_id, user_id, rtype))
+                if cur.fetchone():
+                    continue
+
+                cur.execute("""
+                    SELECT chat_id FROM telegram_subscribers
+                    WHERE user_id=%d AND active=true
+                """ % user_id)
+                tg_subs = cur.fetchall()
+                if not tg_subs:
+                    continue
+
+                amount_str = '{:,.2f}'.format(float(pay_amount)).replace(',', ' ')
+                text = body_tpl % (contract_no, amount_str)
+
+                sub_sent = False
+                for (chat_id,) in tg_subs:
+                    try:
+                        send_tg_message(bot_token, chat_id, text)
+                        sent_total += 1
+                        sub_sent = True
+                    except Exception as e:
+                        failed_total += 1
+                        errors.append(str(e)[:200])
+
+                if sub_sent:
+                    cur.execute("""
+                        INSERT INTO telegram_auto_log (loan_id, schedule_id, user_id, reminder_type)
+                        VALUES (%d, %d, %d, '%s')
+                        ON CONFLICT DO NOTHING
+                    """ % (loan_id, ls_id, user_id, rtype))
+
+    return {'sent': sent_total, 'failed': failed_total, 'errors': errors[:5]}
+
+
+def send_telegram_savings_reminders(cur, conn, check_date):
+    settings = get_telegram_settings(cur)
+
+    if settings.get('savings_enabled', 'false') != 'true':
+        return {'skipped': True, 'reason': 'Telegram savings reminders disabled'}
+
+    bot_token = get_bot_token(cur)
+    if not bot_token:
+        return {'skipped': True, 'reason': 'Bot token not configured'}
+
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
+
+    reminder_days_str = settings.get('savings_reminder_days', '30,15,7')
+    reminder_days = []
+    for d in reminder_days_str.split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    sent_total = 0
+    failed_total = 0
+    errors = []
+
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            rtype = 'tg_savings_end_today'
+            body_tpl = 'Сегодня истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+        elif days == 1:
+            rtype = 'tg_savings_end_1d'
+            body_tpl = 'Завтра истекает срок договора сбережений <b>%s</b>.\nСумма: <b>%s</b> руб.'
+        else:
+            rtype = 'tg_savings_end_%dd' % days
+            body_tpl = 'Через <b>%d дн.</b> истекает срок договора сбережений <b>%%s</b>.\nСумма: <b>%%s</b> руб.' % days
+
+        cur.execute("""
+            SELECT s.id, s.contract_no, s.current_balance, s.member_id
+            FROM savings s
+            WHERE s.status = 'active'
+              AND s.end_date = '%s'
+        """ % target_date)
+        savings_rows = cur.fetchall()
+
+        for s_id, contract_no, balance, member_id in savings_rows:
+            cur.execute("""
+                SELECT u.id FROM users u
+                WHERE u.member_id = %d AND u.role = 'client' AND u.status = 'active'
+            """ % member_id)
+            user_rows = cur.fetchall()
+
+            for (user_id,) in user_rows:
+                cur.execute("""
+                    SELECT id FROM telegram_auto_log
+                    WHERE loan_id=%d AND schedule_id=0 AND user_id=%d AND reminder_type='%s'
+                """ % (s_id, user_id, rtype))
+                if cur.fetchone():
+                    continue
+
+                cur.execute("""
+                    SELECT chat_id FROM telegram_subscribers
+                    WHERE user_id=%d AND active=true
+                """ % user_id)
+                tg_subs = cur.fetchall()
+                if not tg_subs:
+                    continue
+
+                amount_str = '{:,.2f}'.format(float(balance)).replace(',', ' ')
+                text = body_tpl % (contract_no, amount_str)
+
+                sub_sent = False
+                for (chat_id,) in tg_subs:
+                    try:
+                        send_tg_message(bot_token, chat_id, text)
+                        sent_total += 1
+                        sub_sent = True
+                    except Exception as e:
+                        failed_total += 1
+                        errors.append(str(e)[:200])
+
+                if sub_sent:
+                    cur.execute("""
+                        INSERT INTO telegram_auto_log (loan_id, schedule_id, user_id, reminder_type)
                         VALUES (%d, 0, %d, '%s')
                         ON CONFLICT DO NOTHING
                     """ % (s_id, user_id, rtype))
