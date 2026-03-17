@@ -77,6 +77,12 @@ const Admin = () => {
     load();
   };
 
+  const handleBulkCreateClients = async (password?: string) => {
+    const res = await api.users.bulkCreateClients(password);
+    load();
+    return res;
+  };
+
   const handlePwChange = async () => {
     if (!pwForm.old_password || !pwForm.new_password) return;
     try {
@@ -142,6 +148,7 @@ const Admin = () => {
             currentUserId={currentUser?.id}
             onCreate={handleCreateUser}
             onCreateClient={handleCreateClient}
+            onBulkCreate={handleBulkCreateClients}
             onEdit={handleEditUser}
             onDelete={handleDeleteUser}
             onBlock={handleBlockUser}

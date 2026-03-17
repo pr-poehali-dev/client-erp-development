@@ -3680,25 +3680,37 @@ def handle_users(method, params, body, staff, cur, conn):
             conn.commit()
             return {'success': True}
         elif action == 'bulk_create_clients':
-            default_password = body.get('password', 'kpk12345')
+            default_password = body.get('password', '123456')
             if len(default_password) < 6:
                 return {'error': 'Пароль не менее 6 символов'}
             pw_hash = hash_password(default_password)
             cur.execute("SELECT m.id, m.member_no, m.phone, CASE WHEN m.member_type='FL' THEN CONCAT(m.last_name,' ',m.first_name) ELSE m.company_name END as name FROM members m WHERE m.status='active' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.member_id=m.id AND u.role='client')")
             rows = cur.fetchall()
             created = 0
+            skipped = 0
+            skipped_reasons = []
             for r in rows:
                 mid, mno, mphone, mname = r[0], r[1], r[2] or '', r[3] or 'Клиент'
-                login = mno.lower().replace('-', '').replace(' ', '')
+                phone_digits = ''.join(c for c in mphone if c.isdigit())
+                if len(phone_digits) == 11 and phone_digits[0] in ('7', '8'):
+                    phone_digits = '7' + phone_digits[1:]
+                elif len(phone_digits) == 10:
+                    phone_digits = '7' + phone_digits
+                if len(phone_digits) < 11:
+                    skipped += 1
+                    if len(skipped_reasons) < 5:
+                        skipped_reasons.append('%s — нет телефона' % (mno or str(mid)))
+                    continue
+                login = phone_digits
                 cur.execute("SELECT id FROM users WHERE login='%s'" % esc(login))
                 if cur.fetchone():
-                    login = login + str(mid)
-                cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','','%s','client','%s',%s)" % (esc(login), esc(mname), esc(mphone), pw_hash, mid))
+                    login = login + '_' + str(mid)
+                cur.execute("INSERT INTO users (login, name, email, phone, role, password_hash, member_id) VALUES ('%s','%s','','%s','client','%s',%s)" % (esc(login), esc(mname), esc(phone_digits), pw_hash, mid))
                 created += 1
             if created > 0:
-                audit_log(cur, staff, 'bulk_create_clients', 'user', None, '', 'Создано: %s' % created, '')
+                audit_log(cur, staff, 'bulk_create_clients', 'user', None, '', 'Создано: %s, пропущено: %s' % (created, skipped), '')
                 conn.commit()
-            return {'success': True, 'created': created, 'password': default_password}
+            return {'success': True, 'created': created, 'skipped': skipped, 'skipped_reasons': skipped_reasons, 'password': default_password}
     return {'error': 'Неизвестное действие'}
 
 def handle_auth(method, body, cur, conn):

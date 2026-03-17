@@ -225,7 +225,7 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "users", action: "update", ...data }),
     delete: (id: number) => request<{ success: boolean }>("POST", undefined, { entity: "users", action: "delete", id }),
     bulkCreateClients: (password?: string) =>
-      request<{ success: boolean; created: number; password: string }>("POST", undefined, { entity: "users", action: "bulk_create_clients", password }),
+      request<{ success: boolean; created: number; skipped: number; skipped_reasons: string[]; password: string }>("POST", undefined, { entity: "users", action: "bulk_create_clients", password }),
   },
 
   audit: {

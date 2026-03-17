@@ -43,18 +43,22 @@ interface AdminUserManagementProps {
   currentUserId?: number;
   onCreate: (form: { login: string; name: string; role: string; password: string; email: string; phone: string }) => Promise<void>;
   onCreateClient: (form: { login: string; name: string; password: string; phone: string; member_id: string }) => Promise<void>;
+  onBulkCreate: (password?: string) => Promise<{ success: boolean; created: number; skipped: number; skipped_reasons: string[]; password: string }>;
   onEdit: (userId: number, form: { name: string; role: string; login: string; email: string; phone: string; status: string; password: string; member_id: string }) => Promise<void>;
   onDelete: (userId: number) => Promise<void>;
   onBlock: (userId: number) => Promise<void>;
 }
 
 const AdminUserManagement = (props: AdminUserManagementProps) => {
-  const { users, members, loading, currentUserId, onCreate, onCreateClient, onEdit, onDelete, onBlock } = props;
+  const { users, members, loading, currentUserId, onCreate, onCreateClient, onBulkCreate, onEdit, onDelete, onBlock } = props;
   const [showForm, setShowForm] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [editUser, setEditUser] = useState<UserRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [showClientForm, setShowClientForm] = useState(false);
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkPassword, setBulkPassword] = useState("123456");
+  const [bulkResult, setBulkResult] = useState<{ created: number; skipped: number; skipped_reasons: string[]; password: string } | null>(null);
   const [form, setForm] = useState({ login: "", name: "", role: "manager", password: "", email: "", phone: "" });
   const [clientForm, setClientForm] = useState({ login: "", name: "", password: "", phone: "", member_id: "" });
   const [editForm, setEditForm] = useState({ name: "", role: "", login: "", email: "", phone: "", status: "", password: "", member_id: "" as string });
@@ -122,6 +126,18 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
     }
   };
 
+  const handleBulkCreate = async () => {
+    setSaving(true);
+    try {
+      const res = await onBulkCreate(bulkPassword || "123456");
+      setBulkResult(res);
+    } catch (e) {
+      setBulkResult(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <Tabs defaultValue="staff">
@@ -136,7 +152,12 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
         </TabsContent>
 
         <TabsContent value="clients">
-          <div className="mb-4"><Button onClick={() => setShowClientForm(true)}><Icon name="UserPlus" size={16} className="mr-2" />Создать клиента</Button></div>
+          <div className="mb-4 flex gap-2 flex-wrap">
+            <Button onClick={() => setShowClientForm(true)}><Icon name="UserPlus" size={16} className="mr-2" />Создать клиента</Button>
+            <Button variant="outline" onClick={() => { setBulkResult(null); setBulkPassword("123456"); setShowBulkConfirm(true); }}>
+              <Icon name="Users" size={16} className="mr-2" />Создать всем пайщикам
+            </Button>
+          </div>
           <DataTable columns={columns} data={clientUsers} loading={loading} onRowClick={openEdit} />
         </TabsContent>
       </Tabs>
@@ -197,6 +218,70 @@ const AdminUserManagement = (props: AdminUserManagementProps) => {
               )}
             </div>
             <Button onClick={handleEdit} disabled={saving}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBulkConfirm} onOpenChange={v => { if (!saving) setShowBulkConfirm(v); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{bulkResult ? "Результат" : "Массовое создание пользователей"}</DialogTitle></DialogHeader>
+          {!bulkResult ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Будут созданы учётные записи личного кабинета для всех активных пайщиков, у которых ещё нет аккаунта.
+              </p>
+              <div className="bg-muted/50 rounded-lg p-3 space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Логин:</span><span className="font-medium">номер телефона (70000000000)</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Пароль:</span><span className="font-medium font-mono">{bulkPassword}</span></div>
+              </div>
+              <div>
+                <Label>Пароль по умолчанию</Label>
+                <Input value={bulkPassword} onChange={e => setBulkPassword(e.target.value)} placeholder="123456" />
+                <p className="text-xs text-muted-foreground mt-1">Минимум 6 символов. Пайщики смогут сменить пароль в личном кабинете.</p>
+              </div>
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                Пайщики без указанного телефона будут пропущены.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-600">{bulkResult.created}</div>
+                  <div className="text-xs text-green-600">Создано</div>
+                </div>
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-orange-600">{bulkResult.skipped}</div>
+                  <div className="text-xs text-orange-600">Пропущено</div>
+                </div>
+              </div>
+              {bulkResult.created > 0 && (
+                <div className="bg-muted/50 rounded-lg p-3 text-sm">
+                  <span className="text-muted-foreground">Пароль для всех: </span>
+                  <span className="font-mono font-bold">{bulkResult.password}</span>
+                </div>
+              )}
+              {bulkResult.skipped_reasons.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  <div className="font-medium mb-1">Пропущены:</div>
+                  {bulkResult.skipped_reasons.map((r, i) => <div key={i}>{r}</div>)}
+                  {bulkResult.skipped > bulkResult.skipped_reasons.length && <div>...и ещё {bulkResult.skipped - bulkResult.skipped_reasons.length}</div>}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            {!bulkResult ? (
+              <>
+                <Button variant="outline" onClick={() => setShowBulkConfirm(false)} disabled={saving}>Отмена</Button>
+                <Button onClick={handleBulkCreate} disabled={saving || bulkPassword.length < 6}>
+                  {saving && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
+                  Создать
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => setShowBulkConfirm(false)}>Закрыть</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
