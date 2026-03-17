@@ -11,6 +11,7 @@ import api, { StaffUser, Member, Organization } from "@/lib/api";
 import AdminUserManagement from "./admin/AdminUserManagement";
 import AdminAuditLog from "./admin/AdminAuditLog";
 import AdminOrganizations from "./admin/AdminOrganizations";
+import AdminPushMessages from "./admin/AdminPushMessages";
 
 type UserRow = StaffUser & { [key: string]: unknown };
 
@@ -130,6 +131,7 @@ const Admin = () => {
           <TabsTrigger value="users">Пользователи</TabsTrigger>
           <TabsTrigger value="audit">Журнал</TabsTrigger>
           <TabsTrigger value="organizations">Организации</TabsTrigger>
+          <TabsTrigger value="push">PUSH</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -161,6 +163,10 @@ const Admin = () => {
             onUploadLogo={handleUploadLogo}
             onUploadImage={handleUploadImage}
           />
+        </TabsContent>
+
+        <TabsContent value="push">
+          <AdminPushMessages />
         </TabsContent>
       </Tabs>
 

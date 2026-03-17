@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import api, { CabinetOverview, CabinetOrgInfo, LoanDetail, CabinetSavingDetail, Loan, Saving, ShareAccount, ScheduleItem, SavingsScheduleItem, InterestPayout, SavingTransaction } from "@/lib/api";
 import { QRCodeSVG } from "qrcode.react";
 import { buildPaymentQRString } from "@/lib/payment-qr";
+import usePush from "@/hooks/use-push";
 
 const fmt = (n: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n) + " \u20BD";
 const fmtDate = (d: string) => { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
@@ -91,6 +92,7 @@ const Cabinet = () => {
   const navigate = useNavigate();
 
   const token = localStorage.getItem("cabinet_token") || "";
+  const push = usePush(token);
 
   useEffect(() => {
     if (!token) { navigate("/"); return; }
@@ -317,6 +319,23 @@ const Cabinet = () => {
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {push.supported && !push.subscribed && (
+              <Button variant="ghost" size="icon" className="h-9 w-9 relative" onClick={async () => {
+                const ok = await push.subscribe();
+                toast({ title: ok ? "Уведомления включены" : "Не удалось подключить уведомления", variant: ok ? "default" : "destructive" });
+              }} disabled={push.loading} title="Включить уведомления">
+                <Icon name="BellRing" size={16} className="text-orange-500" />
+                <span className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
+              </Button>
+            )}
+            {push.supported && push.subscribed && (
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={async () => {
+                await push.unsubscribe();
+                toast({ title: "Уведомления отключены" });
+              }} disabled={push.loading} title="Уведомления включены">
+                <Icon name="Bell" size={16} className="text-green-500" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-9 w-9 sm:hidden" onClick={() => { setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}>
               <Icon name="Lock" size={16} />
             </Button>

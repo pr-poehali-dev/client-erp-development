@@ -230,6 +230,23 @@ export const api = {
     save: (settings: Partial<OrgSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "org_settings", settings }),
   },
 
+  push: {
+    vapidKey: () => request<{ vapid_public_key: string }>("POST", undefined, { entity: "push", action: "vapid_key" }),
+    subscribe: (token: string, subscription: PushSubscriptionJSON, userAgent: string) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "push", action: "subscribe", token, subscription, user_agent: userAgent }),
+    unsubscribe: (token: string, endpoint?: string) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "push", action: "unsubscribe", token, endpoint }),
+    checkSubscription: (token: string) =>
+      request<{ subscribed: boolean }>("POST", undefined, { entity: "push", action: "check_subscription", token }),
+    stats: () => request<PushStats>("GET", { entity: "push", action: "stats" }),
+    subscribers: () => request<PushSubscriber[]>("GET", { entity: "push", action: "subscribers" }),
+    messages: (limit?: number, offset?: number) =>
+      request<{ items: PushMessage[]; total: number }>("GET", { entity: "push", action: "messages", limit, offset }),
+    send: (data: { title: string; body: string; url?: string; target?: string; target_user_ids?: number[] }) =>
+      request<{ success: boolean; message_id: number; sent: number; failed: number }>("POST", undefined, { entity: "push", action: "send", ...data }),
+    messageLog: (id: number) => request<PushMessageLogEntry[]>("GET", { entity: "push", action: "message_log", id }),
+  },
+
   organizations: {
     list: () => request<Organization[]>("GET", { entity: "organizations" }),
     get: (id: number) => request<Organization>("GET", { entity: "organizations", id }),
@@ -773,6 +790,48 @@ export interface CabinetOverview {
   savings: (Saving & { org_id?: number; org_name?: string; org_short_name?: string })[];
   shares: (ShareAccount & { org_id?: number; org_name?: string; org_short_name?: string })[];
   organizations?: Record<string, CabinetOrgInfo>;
+}
+
+export interface PushStats {
+  total_subscriptions: number;
+  unique_users: number;
+  total_messages: number;
+}
+
+export interface PushSubscriber {
+  user_id: number;
+  name: string;
+  phone: string;
+  email: string;
+  devices: number;
+  last_sub: string;
+}
+
+export interface PushMessage {
+  id: number;
+  title: string;
+  body: string;
+  url: string;
+  target: string;
+  target_user_ids: number[] | null;
+  sent_count: number;
+  failed_count: number;
+  status: string;
+  created_by: number;
+  created_by_name: string;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface PushMessageLogEntry {
+  id: number;
+  message_id: number;
+  subscription_id: number;
+  user_id: number;
+  user_name: string;
+  status: string;
+  error_text: string | null;
+  created_at: string;
 }
 
 export default api;

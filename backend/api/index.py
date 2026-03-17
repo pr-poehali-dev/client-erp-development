@@ -4211,6 +4211,200 @@ def handle_dadata(body):
     except Exception as e:
         return {'suggestions': [], '_error': str(e)}
 
+def handle_push(method, params, body, staff, cur, conn, src_ip=''):
+    """Управление Web Push уведомлениями"""
+    action = body.get('action') or params.get('action', '')
+
+    if action == 'vapid_key':
+        vk = os.environ.get('VAPID_PUBLIC_KEY', '')
+        return {'vapid_public_key': vk}
+
+    if action == 'subscribe':
+        token = body.get('token') or params.get('token', '')
+        if not token:
+            return {'error': 'Требуется токен'}
+        cur.execute("SELECT u.id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at>NOW()" % token.replace("'", "''"))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Недействительная сессия'}
+        user_id = row[0]
+        sub = body.get('subscription', {})
+        endpoint = sub.get('endpoint', '')
+        keys = sub.get('keys', {})
+        p256dh = keys.get('p256dh', '')
+        auth_key = keys.get('auth', '')
+        if not endpoint or not p256dh or not auth_key:
+            return {'error': 'Неверные данные подписки'}
+        ua = body.get('user_agent', '')
+        cur.execute("""INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+            VALUES (%d, '%s', '%s', '%s', '%s')
+            ON CONFLICT (user_id, endpoint) DO UPDATE SET p256dh='%s', auth='%s', user_agent='%s', created_at=NOW()""" % (
+            user_id,
+            endpoint.replace("'", "''"), p256dh.replace("'", "''"), auth_key.replace("'", "''"), ua.replace("'", "''"),
+            p256dh.replace("'", "''"), auth_key.replace("'", "''"), ua.replace("'", "''")))
+        conn.commit()
+        return {'success': True}
+
+    if action == 'unsubscribe':
+        token = body.get('token') or params.get('token', '')
+        if not token:
+            return {'error': 'Требуется токен'}
+        cur.execute("SELECT u.id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at>NOW()" % token.replace("'", "''"))
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Недействительная сессия'}
+        user_id = row[0]
+        endpoint = body.get('endpoint', '')
+        if endpoint:
+            cur.execute("UPDATE push_subscriptions SET user_agent='unsubscribed' WHERE user_id=%d AND endpoint='%s'" % (user_id, endpoint.replace("'", "''")))
+        else:
+            cur.execute("UPDATE push_subscriptions SET user_agent='unsubscribed' WHERE user_id=%d" % user_id)
+        conn.commit()
+        return {'success': True}
+
+    if action == 'check_subscription':
+        token = body.get('token') or params.get('token', '')
+        if not token:
+            return {'subscribed': False}
+        cur.execute("SELECT u.id FROM users u JOIN client_sessions cs ON cs.user_id=u.id WHERE cs.token='%s' AND cs.expires_at>NOW()" % token.replace("'", "''"))
+        row = cur.fetchone()
+        if not row:
+            return {'subscribed': False}
+        cur.execute("SELECT COUNT(*) FROM push_subscriptions WHERE user_id=%d AND user_agent!='unsubscribed'" % row[0])
+        cnt = cur.fetchone()[0]
+        return {'subscribed': cnt > 0}
+
+    if not staff:
+        return {'error': 'Требуется авторизация', '_status': 401}
+
+    if action == 'stats':
+        cur.execute("SELECT COUNT(*) FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+        total_subs = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT user_id) FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+        unique_users = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM push_messages")
+        total_messages = cur.fetchone()[0]
+        return {'total_subscriptions': total_subs, 'unique_users': unique_users, 'total_messages': total_messages}
+
+    if action == 'subscribers':
+        cur.execute("""SELECT ps.user_id, u.name, u.phone, u.email, COUNT(ps.id) as devices, MAX(ps.created_at) as last_sub
+            FROM push_subscriptions ps
+            JOIN users u ON u.id=ps.user_id
+            WHERE ps.user_agent!='unsubscribed'
+            GROUP BY ps.user_id, u.name, u.phone, u.email
+            ORDER BY last_sub DESC""")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, datetime):
+                    r[k] = v.isoformat()
+        return rows
+
+    if action == 'messages':
+        limit = int(params.get('limit', 50))
+        offset = int(params.get('offset', 0))
+        cur.execute("""SELECT pm.*, u.name as created_by_name
+            FROM push_messages pm LEFT JOIN users u ON u.id=pm.created_by
+            ORDER BY pm.created_at DESC LIMIT %d OFFSET %d""" % (limit, offset))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+                elif isinstance(v, Decimal):
+                    r[k] = float(v)
+        cur.execute("SELECT COUNT(*) FROM push_messages")
+        total = cur.fetchone()[0]
+        return {'items': rows, 'total': total}
+
+    if action == 'send':
+        title = body.get('title', '').strip()
+        msg_body = body.get('body', '').strip()
+        url = body.get('url', '').strip()
+        target = body.get('target', 'all')
+        target_user_ids = body.get('target_user_ids', [])
+        if not title or not msg_body:
+            return {'error': 'Укажите заголовок и текст сообщения'}
+
+        cur.execute("""INSERT INTO push_messages (title, body, url, target, target_user_ids, created_by, status)
+            VALUES ('%s', '%s', '%s', '%s', %s, %d, 'sending') RETURNING id""" % (
+            title.replace("'", "''"), msg_body.replace("'", "''"), url.replace("'", "''"),
+            target.replace("'", "''"),
+            "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_user_ids) if target_user_ids else 'NULL',
+            staff['id']))
+        message_id = cur.fetchone()[0]
+        conn.commit()
+
+        if target == 'all':
+            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_agent!='unsubscribed'")
+        elif target == 'selected' and target_user_ids:
+            ids_str = ','.join(str(int(i)) for i in target_user_ids)
+            cur.execute("SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (%s) AND user_agent!='unsubscribed'" % ids_str)
+        else:
+            return {'error': 'Неверный тип рассылки'}
+
+        subs = cur.fetchall()
+        sent = 0
+        failed = 0
+        vapid_private = os.environ.get('VAPID_PRIVATE_KEY', '')
+        vapid_email = os.environ.get('VAPID_EMAIL', 'mailto:admin@example.com')
+        vapid_public = os.environ.get('VAPID_PUBLIC_KEY', '')
+
+        if not vapid_private or not vapid_public:
+            cur.execute("UPDATE push_messages SET status='error', sent_count=0, failed_count=0 WHERE id=%d" % message_id)
+            conn.commit()
+            return {'error': 'VAPID ключи не настроены'}
+
+        try:
+            from pywebpush import webpush, WebPushException
+        except ImportError:
+            cur.execute("UPDATE push_messages SET status='error' WHERE id=%d" % message_id)
+            conn.commit()
+            return {'error': 'Библиотека pywebpush не установлена'}
+
+        payload = json.dumps({'title': title, 'body': msg_body, 'url': url, 'message_id': message_id})
+
+        for sub_row in subs:
+            sub_id, uid, endpoint, p256dh, auth_key = sub_row
+            try:
+                webpush(
+                    subscription_info={'endpoint': endpoint, 'keys': {'p256dh': p256dh, 'auth': auth_key}},
+                    data=payload,
+                    vapid_private_key=vapid_private,
+                    vapid_claims={'sub': vapid_email}
+                )
+                cur.execute("INSERT INTO push_message_log (message_id, subscription_id, user_id, status) VALUES (%d, %d, %d, 'sent')" % (message_id, sub_id, uid))
+                sent += 1
+            except Exception as e:
+                err_str = str(e)[:500].replace("'", "''")
+                cur.execute("INSERT INTO push_message_log (message_id, subscription_id, user_id, status, error_text) VALUES (%d, %d, %d, 'failed', '%s')" % (message_id, sub_id, uid, err_str))
+                failed += 1
+                if '410' in str(e) or '404' in str(e):
+                    cur.execute("UPDATE push_subscriptions SET user_agent='expired' WHERE id=%d" % sub_id)
+
+        cur.execute("UPDATE push_messages SET status='sent', sent_count=%d, failed_count=%d, sent_at=NOW() WHERE id=%d" % (sent, failed, message_id))
+        conn.commit()
+        return {'success': True, 'message_id': message_id, 'sent': sent, 'failed': failed}
+
+    if action == 'message_log':
+        message_id = int(params.get('id') or body.get('id', 0))
+        if not message_id:
+            return {'error': 'Укажите id сообщения'}
+        cur.execute("""SELECT pml.*, u.name as user_name
+            FROM push_message_log pml LEFT JOIN users u ON u.id=pml.user_id
+            WHERE pml.message_id=%d ORDER BY pml.created_at DESC""" % message_id)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, datetime):
+                    r[k] = v.isoformat()
+        return rows
+
+    return {'error': 'Неизвестное действие: %s' % action}
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
 def handler(event, context):
@@ -4275,6 +4469,8 @@ def handler(event, context):
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
             result = handle_cabinet(method, params, body, ev_headers, cur)
+        elif entity == 'push':
+            result = handle_push(method, params, body, staff, cur, conn, src_ip)
         elif entity == 'dadata':
             result = handle_dadata(body)
         elif entity == 'cron':
