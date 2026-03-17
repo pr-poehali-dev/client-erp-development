@@ -86,6 +86,7 @@ const Cabinet = () => {
   const [showLoan, setShowLoan] = useState(false);
   const [showSaving, setShowSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [pwForm, setPwForm] = useState({ old: "", new_pw: "", confirm: "" });
   const [savingPw, setSavingPw] = useState(false);
   const { toast } = useToast();
@@ -318,37 +319,9 @@ const Cabinet = () => {
               <div className="text-xs text-muted-foreground">{data.info.member_no}</div>
             </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {push.supported && !push.subscribed && (
-              <Button variant="ghost" size="icon" className="h-9 w-9 relative" onClick={async () => {
-                const ok = await push.subscribe();
-                toast({ title: ok ? "Уведомления включены" : "Не удалось подключить уведомления", variant: ok ? "default" : "destructive" });
-              }} disabled={push.loading} title="Включить уведомления">
-                <Icon name="BellRing" size={16} className="text-orange-500" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-              </Button>
-            )}
-            {push.supported && push.subscribed && (
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={async () => {
-                await push.unsubscribe();
-                toast({ title: "Уведомления отключены" });
-              }} disabled={push.loading} title="Уведомления включены">
-                <Icon name="Bell" size={16} className="text-green-500" />
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" className="h-9 w-9 sm:hidden" onClick={() => { setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}>
-              <Icon name="Lock" size={16} />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-9 w-9 sm:hidden text-destructive" onClick={handleLogout}>
-              <Icon name="LogOut" size={16} />
-            </Button>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs hidden sm:inline-flex" onClick={() => { setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}>
-              <Icon name="Lock" size={14} />Сменить пароль
-            </Button>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hidden sm:inline-flex" onClick={handleLogout}>
-              <Icon name="LogOut" size={14} />Выход
-            </Button>
-          </div>
+          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setShowMenu(true)}>
+            <Icon name="Settings" size={18} />
+          </Button>
         </div>
       </header>
 
@@ -422,6 +395,51 @@ const Cabinet = () => {
         <DialogContent className="max-w-3xl w-[calc(100vw-1rem)] sm:w-auto max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader><DialogTitle className="text-base sm:text-lg">Договор {savingDetail?.contract_no}</DialogTitle></DialogHeader>
           {savingDetail && <SavingDetailView saving={savingDetail} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMenu} onOpenChange={setShowMenu}>
+        <DialogContent className="max-w-sm w-[calc(100vw-1rem)] sm:w-auto p-0">
+          <DialogHeader className="p-4 pb-0"><DialogTitle className="text-base">Настройки</DialogTitle></DialogHeader>
+          <div className="p-2">
+            {push.supported && (
+              <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={async () => {
+                if (push.subscribed) {
+                  await push.unsubscribe();
+                  toast({ title: "Уведомления отключены" });
+                } else {
+                  const ok = await push.subscribe();
+                  toast({ title: ok ? "Уведомления включены" : "Не удалось подключить", variant: ok ? "default" : "destructive" });
+                }
+              }} disabled={push.loading}>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${push.subscribed ? "bg-green-50" : "bg-orange-50"}`}>
+                  <Icon name={push.subscribed ? "Bell" : "BellOff"} size={18} className={push.subscribed ? "text-green-500" : "text-orange-500"} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">Push-уведомления</div>
+                  <div className="text-xs text-muted-foreground">{push.subscribed ? "Включены — нажмите, чтобы отключить" : "Отключены — нажмите, чтобы включить"}</div>
+                </div>
+              </button>
+            )}
+            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={() => { setShowMenu(false); setPwForm({ old: "", new_pw: "", confirm: "" }); setShowPassword(true); }}>
+              <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                <Icon name="Lock" size={18} className="text-blue-500" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Сменить пароль</div>
+                <div className="text-xs text-muted-foreground">Изменить пароль для входа</div>
+              </div>
+            </button>
+            <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={() => { setShowMenu(false); handleLogout(); }}>
+              <div className="w-9 h-9 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+                <Icon name="LogOut" size={18} className="text-red-500" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-red-600">Выйти</div>
+                <div className="text-xs text-muted-foreground">Выход из личного кабинета</div>
+              </div>
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
 
