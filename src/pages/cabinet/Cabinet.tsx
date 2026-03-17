@@ -90,6 +90,7 @@ const Cabinet = () => {
   const [showMessages, setShowMessages] = useState(false);
   const [messages, setMessages] = useState<PushClientMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [pwForm, setPwForm] = useState({ old: "", new_pw: "", confirm: "" });
   const [savingPw, setSavingPw] = useState(false);
   const { toast } = useToast();
@@ -109,6 +110,16 @@ const Cabinet = () => {
     }).finally(() => setLoading(false));
   }, [token, navigate]);
 
+  useEffect(() => {
+    if (!token) return;
+    api.push.myMessages(token).then(msgs => {
+      const lastSeen = localStorage.getItem("push_last_seen") || "0";
+      const count = msgs.filter(m => m.sent_at && m.sent_at > lastSeen).length;
+      setUnreadCount(count);
+      setMessages(msgs);
+    }).catch(() => {});
+  }, [token]);
+
   const handleLogout = async () => {
     await api.auth.logout(token);
     localStorage.removeItem("cabinet_token");
@@ -122,6 +133,10 @@ const Cabinet = () => {
     try {
       const msgs = await api.push.myMessages(token);
       setMessages(msgs);
+      if (msgs.length > 0 && msgs[0].sent_at) {
+        localStorage.setItem("push_last_seen", msgs[0].sent_at);
+      }
+      setUnreadCount(0);
     } catch (e) { void e; }
     setMessagesLoading(false);
   };
@@ -333,8 +348,13 @@ const Cabinet = () => {
             </div>
           </div>
           <div className="flex items-center gap-0.5 shrink-0">
-            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={openMessages}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 relative" onClick={openMessages}>
               <Icon name="Bell" size={18} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
             </Button>
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setShowMenu(true)}>
               <Icon name="Settings" size={18} />
