@@ -93,6 +93,9 @@ const Cabinet = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [pwForm, setPwForm] = useState({ old: "", new_pw: "", confirm: "" });
   const [savingPw, setSavingPw] = useState(false);
+  const [tgLinked, setTgLinked] = useState<boolean | null>(null);
+  const [tgUsername, setTgUsername] = useState("");
+  const [tgLinking, setTgLinking] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -118,7 +121,41 @@ const Cabinet = () => {
       setUnreadCount(count);
       setMessages(msgs);
     }).catch(() => {});
+    api.cabinet.telegramStatus(token).then(res => {
+      setTgLinked(res.linked);
+      if (res.username) setTgUsername(res.username);
+    }).catch(() => {});
   }, [token]);
+
+  const handleTelegramLink = async () => {
+    setTgLinking(true);
+    try {
+      const res = await api.cabinet.telegramLink(token);
+      window.open(res.link_url, "_blank");
+      toast({ title: "Откройте Telegram", description: "Нажмите «Start» в боте для завершения привязки" });
+      setTimeout(() => {
+        api.cabinet.telegramStatus(token).then(r => {
+          setTgLinked(r.linked);
+          if (r.username) setTgUsername(r.username);
+        }).catch(() => {});
+      }, 5000);
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    } finally {
+      setTgLinking(false);
+    }
+  };
+
+  const handleTelegramUnlink = async () => {
+    try {
+      await api.cabinet.telegramUnlink(token);
+      setTgLinked(false);
+      setTgUsername("");
+      toast({ title: "Telegram отвязан" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+  };
 
   const handleLogout = async () => {
     await api.auth.logout(token);
@@ -502,6 +539,19 @@ const Cabinet = () => {
                 <div className="min-w-0">
                   <div className="text-sm font-medium">Push-уведомления</div>
                   <div className="text-xs text-muted-foreground">{push.subscribed ? "Включены — нажмите, чтобы отключить" : "Отключены — нажмите, чтобы включить"}</div>
+                </div>
+              </button>
+            )}
+            {tgLinked !== null && (
+              <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left" onClick={tgLinked ? handleTelegramUnlink : handleTelegramLink} disabled={tgLinking}>
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${tgLinked ? "bg-sky-50" : "bg-slate-100"}`}>
+                  <Icon name="Send" size={18} className={tgLinked ? "text-sky-500" : "text-slate-400"} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">Telegram</div>
+                  <div className="text-xs text-muted-foreground">
+                    {tgLinking ? "Подождите..." : tgLinked ? `Привязан${tgUsername ? ` (@${tgUsername})` : ""} — нажмите, чтобы отвязать` : "Привязать для получения уведомлений"}
+                  </div>
                 </div>
               </button>
             )}

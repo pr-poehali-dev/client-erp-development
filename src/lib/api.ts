@@ -199,6 +199,9 @@ export const api = {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
+    telegramLink: (token: string) => request<{ bot_username: string; link_code: string; link_url: string }>("POST", undefined, { entity: "cabinet", action: "telegram_link", token }),
+    telegramStatus: (token: string) => request<{ linked: boolean; chat_id?: number; username?: string; first_name?: string; subscribed_at?: string }>("GET", { entity: "cabinet", action: "telegram_status", token }),
+    telegramUnlink: (token: string) => request<{ success: boolean }>("POST", undefined, { entity: "cabinet", action: "telegram_unlink", token }),
   },
 
   staffAuth: {
@@ -265,6 +268,9 @@ export const api = {
     stats: () => request<NotificationStats>("GET", { entity: "notifications", action: "stats" }),
     testTelegram: (chat_id: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_telegram", chat_id }),
     testEmail: (to_email: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_email", to_email }),
+    setWebhook: (webhookUrl?: string) => request<{ success: boolean; webhook_url: string }>("POST", undefined, { entity: "notifications", action: "set_webhook", webhook_url: webhookUrl }),
+    deleteWebhook: () => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "delete_webhook" }),
+    webhookInfo: () => request<{ url: string; has_custom_certificate: boolean; pending_update_count: number; last_error_date?: number; last_error_message?: string }>("POST", undefined, { entity: "notifications", action: "webhook_info" }),
   },
 
   organizations: {

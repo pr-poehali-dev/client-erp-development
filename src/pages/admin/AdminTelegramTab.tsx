@@ -52,6 +52,10 @@ const AdminTelegramTab = () => {
   const [savingSettings, setSavingSettings] = useState(false);
   const [testChatId, setTestChatId] = useState("");
   const [testing, setTesting] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookPending, setWebhookPending] = useState(0);
+  const [webhookError, setWebhookError] = useState("");
+  const [webhookLoading, setWebhookLoading] = useState(false);
   const { toast } = useToast();
 
   const loadData = async () => {
@@ -80,7 +84,16 @@ const AdminTelegramTab = () => {
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  const loadWebhookInfo = async () => {
+    try {
+      const info = await api.notifications.webhookInfo();
+      setWebhookUrl(info.url || "");
+      setWebhookPending(info.pending_update_count || 0);
+      setWebhookError(info.last_error_message || "");
+    } catch { /* skip */ }
+  };
+
+  useEffect(() => { loadData(); loadWebhookInfo(); }, []);
 
   const handleSend = async () => {
     if (!form.body.trim()) {
@@ -369,6 +382,44 @@ const AdminTelegramTab = () => {
                   {savingSettings && <Icon name="Loader2" size={16} className="animate-spin mr-2" />}
                   Сохранить
                 </Button>
+              </div>
+              <div className="border-t pt-4 mt-4">
+                <Label>Webhook для бота</Label>
+                <p className="text-xs text-muted-foreground mb-2">Webhook нужен, чтобы бот принимал команды от пайщиков (привязка Telegram)</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant={webhookUrl ? "default" : "secondary"}>
+                    {webhookUrl ? "Активен" : "Не установлен"}
+                  </Badge>
+                  {webhookPending > 0 && <Badge variant="secondary">Ожидает: {webhookPending}</Badge>}
+                  {webhookError && <Badge variant="destructive" className="text-xs max-w-[300px] truncate">{webhookError}</Badge>}
+                </div>
+                {webhookUrl && <p className="text-xs text-muted-foreground font-mono mb-2 break-all">{webhookUrl}</p>}
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    setWebhookLoading(true);
+                    try {
+                      const res = await api.notifications.setWebhook();
+                      toast({ title: "Webhook установлен", description: res.webhook_url });
+                      loadWebhookInfo();
+                    } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                    setWebhookLoading(false);
+                  }} disabled={webhookLoading}>
+                    {webhookLoading ? <Icon name="Loader2" size={14} className="animate-spin mr-1" /> : <Icon name="Link" size={14} className="mr-1" />}
+                    {webhookUrl ? "Обновить" : "Установить"}
+                  </Button>
+                  {webhookUrl && (
+                    <Button variant="outline" size="sm" onClick={async () => {
+                      try {
+                        await api.notifications.deleteWebhook();
+                        setWebhookUrl("");
+                        toast({ title: "Webhook удалён" });
+                      } catch (e) { toast({ title: "Ошибка", description: String(e), variant: "destructive" }); }
+                    }}>
+                      <Icon name="Unlink" size={14} className="mr-1" />
+                      Удалить
+                    </Button>
+                  )}
+                </div>
               </div>
               <div className="border-t pt-4 mt-4">
                 <Label>Тест отправки</Label>

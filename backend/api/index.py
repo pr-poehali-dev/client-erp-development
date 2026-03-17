@@ -3861,7 +3861,7 @@ def handle_auth(method, body, cur, conn):
 
     return {'error': 'Неизвестное действие'}
 
-def handle_cabinet(method, params, body, headers, cur):
+def handle_cabinet(method, params, body, headers, cur, conn=None):
     token = params.get('token') or body.get('token', '')
     if not token:
         token = (headers or {}).get('X-Auth-Token') or (headers or {}).get('x-auth-token', '')
@@ -3870,6 +3870,7 @@ def handle_cabinet(method, params, body, headers, cur):
     row = cur.fetchone()
     if not row:
         return {'_status': 401, 'error': 'Не авторизован'}
+    user_id = row[0]
     member_id = row[1]
 
     action = params.get('action') or body.get('action', 'overview')
@@ -4013,6 +4014,43 @@ def handle_cabinet(method, params, body, headers, cur):
         saving['interest_payouts'] = query_rows(cur, "SELECT id, transaction_date, amount, description FROM savings_transactions WHERE saving_id=%s AND transaction_type='interest_payout' ORDER BY transaction_date DESC" % saving_id)
         saving['transactions'] = query_rows(cur, "SELECT id, transaction_date, amount, transaction_type, description FROM savings_transactions WHERE saving_id=%s AND transaction_type IN ('deposit','withdrawal') ORDER BY transaction_date DESC" % saving_id)
         return saving
+
+    elif action == 'telegram_link':
+        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        if not bot_token:
+            cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+            row = cur.fetchone()
+            if row:
+                ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                bot_token = ch.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Telegram-бот не настроен. Обратитесь в КПК.'}
+        try:
+            url = 'https://api.telegram.org/bot%s/getMe' % bot_token
+            req = urllib.request.Request(url)
+            resp = urllib.request.urlopen(req, timeout=10)
+            me = json.loads(resp.read().decode('utf-8'))
+            bot_username = me.get('result', {}).get('username', '')
+        except:
+            return {'error': 'Не удалось получить данные бота'}
+        code = secrets.token_hex(16)
+        expires = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("DELETE FROM telegram_link_codes WHERE user_id=%s" % user_id)
+        cur.execute("INSERT INTO telegram_link_codes (user_id, code, expires_at) VALUES (%s, '%s', '%s')" % (user_id, code, expires))
+        conn.commit()
+        return {'bot_username': bot_username, 'link_code': code, 'link_url': 'https://t.me/%s?start=%s' % (bot_username, code)}
+
+    elif action == 'telegram_status':
+        cur.execute("SELECT ts.id, ts.chat_id, ts.username, ts.first_name, ts.subscribed_at FROM telegram_subscribers ts WHERE ts.user_id=%s AND ts.active=true" % user_id)
+        row = cur.fetchone()
+        if row:
+            return {'linked': True, 'chat_id': row[1], 'username': row[2] or '', 'first_name': row[3] or '', 'subscribed_at': serialize(row[4])}
+        return {'linked': False}
+
+    elif action == 'telegram_unlink':
+        cur.execute("UPDATE telegram_subscribers SET active=false WHERE user_id=%s AND active=true" % user_id)
+        conn.commit()
+        return {'success': True}
 
     return {'error': 'Неизвестное действие'}
 
@@ -4730,7 +4768,144 @@ def handle_notifications(method, params, body, staff, cur, conn):
         except Exception as e:
             return {'error': 'Ошибка: %s' % str(e)}
 
+    if action == 'set_webhook':
+        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        if not bot_token:
+            cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+            row = cur.fetchone()
+            if row:
+                ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                bot_token = ch.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Токен бота не найден'}
+        webhook_url = body.get('webhook_url', '') or '%s?entity=telegram_bot' % os.environ.get('API_URL', 'https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450')
+        try:
+            url = 'https://api.telegram.org/bot%s/setWebhook' % bot_token
+            data = json.dumps({'url': webhook_url}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            return {'success': True, 'telegram_result': result, 'webhook_url': webhook_url}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    if action == 'delete_webhook':
+        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        if not bot_token:
+            cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+            row = cur.fetchone()
+            if row:
+                ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                bot_token = ch.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Токен бота не найден'}
+        try:
+            url = 'https://api.telegram.org/bot%s/deleteWebhook' % bot_token
+            req = urllib.request.Request(url, data=b'{}', headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            return {'success': True, 'telegram_result': result}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    if action == 'webhook_info':
+        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        if not bot_token:
+            cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+            row = cur.fetchone()
+            if row:
+                ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                bot_token = ch.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Токен бота не найден'}
+        try:
+            url = 'https://api.telegram.org/bot%s/getWebhookInfo' % bot_token
+            req = urllib.request.Request(url)
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            return result.get('result', {})
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
     return {'error': 'Неизвестное действие: %s' % action}
+
+def handle_telegram_bot(method, body, cur, conn):
+    """Webhook для Telegram-бота: приём подписок от пайщиков"""
+    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    if not bot_token:
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+        row = cur.fetchone()
+        if row:
+            ch = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            bot_token = ch.get('bot_token', '')
+    if not bot_token:
+        return {'ok': True}
+
+    msg = body.get('message') or body.get('edited_message') or {}
+    chat = msg.get('chat', {})
+    chat_id = chat.get('id')
+    text = (msg.get('text') or '').strip()
+    tg_username = chat.get('username', '')
+    tg_first_name = chat.get('first_name', '')
+
+    if not chat_id:
+        return {'ok': True}
+
+    def send_tg(txt):
+        url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
+        data = json.dumps({'chat_id': chat_id, 'text': txt, 'parse_mode': 'HTML'}).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        try:
+            urllib.request.urlopen(req, timeout=10)
+        except:
+            pass
+
+    if text.startswith('/start'):
+        parts = text.split(maxsplit=1)
+        if len(parts) > 1:
+            link_code = parts[1].strip()
+            cur.execute("SELECT user_id FROM telegram_link_codes WHERE code='%s' AND expires_at > NOW()" % esc(link_code))
+            row = cur.fetchone()
+            if not row:
+                send_tg('Ссылка для привязки недействительна или истекла.\n\nПерейдите в личный кабинет и нажмите «Привязать Telegram» заново.')
+                return {'ok': True}
+            user_id = row[0]
+            cur.execute("DELETE FROM telegram_link_codes WHERE code='%s'" % esc(link_code))
+            cur.execute("SELECT id, active FROM telegram_subscribers WHERE user_id=%s AND chat_id=%s" % (user_id, chat_id))
+            existing = cur.fetchone()
+            if existing:
+                cur.execute("UPDATE telegram_subscribers SET active=true, username='%s', first_name='%s', subscribed_at=NOW() WHERE id=%s" % (esc(tg_username), esc(tg_first_name), existing[0]))
+            else:
+                cur.execute("INSERT INTO telegram_subscribers (user_id, chat_id, username, first_name) VALUES (%s, %s, '%s', '%s')" % (user_id, chat_id, esc(tg_username), esc(tg_first_name)))
+            conn.commit()
+            cur.execute("SELECT u.name FROM users u WHERE u.id=%s" % user_id)
+            urow = cur.fetchone()
+            name = urow[0] if urow else ''
+            welcome = 'Здравствуйте'
+            if name:
+                welcome = 'Здравствуйте, %s' % name
+            send_tg('%s! Telegram успешно привязан.\n\nТеперь вы будете получать уведомления о платежах и новости кооператива.' % welcome)
+        else:
+            send_tg('Для привязки Telegram перейдите в личный кабинет на сайте и нажмите кнопку «Привязать Telegram».\n\nЕсли у вас нет доступа к личному кабинету — обратитесь в КПК.')
+        return {'ok': True}
+
+    if text in ('/stop', '/unsubscribe'):
+        cur.execute("UPDATE telegram_subscribers SET active=false WHERE chat_id=%s AND active=true" % chat_id)
+        conn.commit()
+        send_tg('Вы отписались от уведомлений. Чтобы подписаться снова, перейдите в личный кабинет.')
+        return {'ok': True}
+
+    if text == '/status':
+        cur.execute("SELECT ts.id, u.name FROM telegram_subscribers ts JOIN users u ON u.id=ts.user_id WHERE ts.chat_id=%s AND ts.active=true" % chat_id)
+        row = cur.fetchone()
+        if row:
+            send_tg('Вы подписаны на уведомления.\nАккаунт: %s\n\nДля отписки отправьте /stop' % (row[1] or ''))
+        else:
+            send_tg('Вы не подписаны на уведомления.\n\nДля подписки перейдите в личный кабинет.')
+        return {'ok': True}
+
+    send_tg('Я бот для уведомлений КПК.\n\nКоманды:\n/status — проверить подписку\n/stop — отписаться от уведомлений')
+    return {'ok': True}
 
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
@@ -4788,11 +4963,13 @@ def handler(event, context):
         elif entity == 'auth':
             result = handle_auth(method, body, cur, conn)
         elif entity == 'cabinet':
-            result = handle_cabinet(method, params, body, ev_headers, cur)
+            result = handle_cabinet(method, params, body, ev_headers, cur, conn)
         elif entity == 'push':
             result = handle_push(method, params, body, staff, cur, conn, src_ip)
         elif entity == 'notifications':
             result = handle_notifications(method, params, body, staff, cur, conn)
+        elif entity == 'telegram_bot':
+            result = handle_telegram_bot(method, body, cur, conn)
         elif entity == 'dadata':
             result = handle_dadata(body)
         elif entity == 'cron':

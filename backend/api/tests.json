@@ -16,5 +16,7 @@
   {"name": "Push VAPID key", "method": "POST", "path": "/", "body": {"entity": "push", "action": "vapid_key"}, "expectedStatus": 201, "expectedBody": {"vapid_public_key": "string"}, "bodyMatcher": "partial"},
   {"name": "Push check subscription invalid", "method": "POST", "path": "/", "body": {"entity": "push", "action": "check_subscription", "token": "invalid"}, "expectedStatus": 201, "expectedBody": {"subscribed": false}, "bodyMatcher": "partial"},
   {"name": "Push subscribe no token", "method": "POST", "path": "/", "body": {"entity": "push", "action": "subscribe"}, "expectedStatus": 400},
-  {"name": "Notification stats", "method": "GET", "path": "/?entity=notifications&action=stats", "expectedStatus": 401, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"}
+  {"name": "Notification stats", "method": "GET", "path": "/?entity=notifications&action=stats", "expectedStatus": 401, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"},
+  {"name": "Telegram bot webhook empty", "method": "POST", "path": "/", "body": {"entity": "telegram_bot"}, "expectedStatus": 201, "expectedBody": {"ok": true}, "bodyMatcher": "partial"},
+  {"name": "Cabinet telegram status unauthorized", "method": "GET", "path": "/?entity=cabinet&action=telegram_status&token=invalid", "expectedStatus": 401}
 ]}
