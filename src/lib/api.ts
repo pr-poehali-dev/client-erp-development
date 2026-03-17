@@ -250,6 +250,23 @@ export const api = {
     saveSettings: (settings: Partial<PushSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "push", action: "save_settings", settings }),
   },
 
+  notifications: {
+    channels: () => request<NotificationChannel[]>("GET", { entity: "notifications", action: "channels" }),
+    saveChannel: (channel: string, enabled?: boolean, settings?: Record<string, unknown>) =>
+      request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_channel", channel, enabled, settings }),
+    telegramSubscribers: () => request<TelegramSubscriber[]>("GET", { entity: "notifications", action: "telegram_subscribers" }),
+    sendTelegram: (data: { title?: string; body: string; target?: string; target_user_ids?: number[] }) =>
+      request<{ success: boolean; notification_id: number; sent: number; failed: number }>("POST", undefined, { entity: "notifications", action: "send_telegram", ...data }),
+    sendEmail: (data: { title: string; body: string; target?: string; target_user_ids?: number[] }) =>
+      request<{ success: boolean; notification_id: number; sent: number; failed: number }>("POST", undefined, { entity: "notifications", action: "send_email", ...data }),
+    history: (channel?: string, limit?: number, offset?: number) =>
+      request<{ items: NotificationHistoryItem[]; total: number }>("GET", { entity: "notifications", action: "history", channel, limit, offset }),
+    historyLog: (id: number) => request<NotificationLogEntry[]>("GET", { entity: "notifications", action: "history_log", id }),
+    stats: () => request<NotificationStats>("GET", { entity: "notifications", action: "stats" }),
+    testTelegram: (chat_id: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_telegram", chat_id }),
+    testEmail: (to_email: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_email", to_email }),
+  },
+
   organizations: {
     list: () => request<Organization[]>("GET", { entity: "organizations" }),
     get: (id: number) => request<Organization>("GET", { entity: "organizations", id }),
@@ -854,6 +871,61 @@ export interface PushSettings {
   savings_enabled: string;
   savings_reminder_days: string;
   savings_remind_time: string;
+}
+
+export interface NotificationChannel {
+  id: number;
+  channel: string;
+  enabled: boolean;
+  settings: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface TelegramSubscriber {
+  id: number;
+  user_id: number;
+  name: string;
+  chat_id: number;
+  username: string;
+  first_name: string;
+  subscribed_at: string;
+  active: boolean;
+}
+
+export interface NotificationHistoryItem {
+  id: number;
+  channel: string;
+  title: string;
+  body: string;
+  url: string | null;
+  target: string;
+  target_user_ids: number[] | null;
+  sent_count: number;
+  failed_count: number;
+  status: string;
+  created_by: number;
+  created_by_name: string;
+  created_at: string;
+  sent_at: string | null;
+  error_text: string | null;
+}
+
+export interface NotificationLogEntry {
+  id: number;
+  notification_id: number;
+  user_id: number;
+  user_name: string;
+  channel: string;
+  status: string;
+  error_text: string | null;
+  created_at: string;
+}
+
+export interface NotificationStats {
+  telegram_subscribers: number;
+  email_users: number;
+  telegram_messages: number;
+  email_messages: number;
 }
 
 export default api;

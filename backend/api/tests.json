@@ -15,5 +15,6 @@
   {"name": "Loan certificate unauthorized", "method": "GET", "path": "/?entity=cabinet&action=loan_certificate&token=invalid&id=1&date_from=2024-01-01&date_to=2024-12-31", "expectedStatus": 401},
   {"name": "Push VAPID key", "method": "POST", "path": "/", "body": {"entity": "push", "action": "vapid_key"}, "expectedStatus": 201, "expectedBody": {"vapid_public_key": "string"}, "bodyMatcher": "partial"},
   {"name": "Push check subscription invalid", "method": "POST", "path": "/", "body": {"entity": "push", "action": "check_subscription", "token": "invalid"}, "expectedStatus": 201, "expectedBody": {"subscribed": false}, "bodyMatcher": "partial"},
-  {"name": "Push subscribe no token", "method": "POST", "path": "/", "body": {"entity": "push", "action": "subscribe"}, "expectedStatus": 400}
+  {"name": "Push subscribe no token", "method": "POST", "path": "/", "body": {"entity": "push", "action": "subscribe"}, "expectedStatus": 400},
+  {"name": "Notification stats", "method": "GET", "path": "/?entity=notifications&action=stats", "expectedStatus": 401, "expectedBody": {"error": "string"}, "bodyMatcher": "partial"}
 ]}

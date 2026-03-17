@@ -4450,6 +4450,288 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
 
     return {'error': 'Неизвестное действие: %s' % action}
 
+def handle_notifications(method, params, body, staff, cur, conn):
+    """Управление уведомлениями: Telegram, Email, общая история"""
+    if not staff:
+        return {'error': 'Требуется авторизация', '_status': 401}
+    
+    action = body.get('action') or params.get('action', '')
+
+    if action == 'channels':
+        cur.execute("SELECT id, channel, enabled, settings, updated_at FROM notification_channels ORDER BY id")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+        return rows
+
+    if action == 'save_channel':
+        channel = body.get('channel', '')
+        enabled = body.get('enabled')
+        settings = body.get('settings', {})
+        if channel not in ('push', 'telegram', 'email'):
+            return {'error': 'Неизвестный канал'}
+        parts = []
+        if enabled is not None:
+            parts.append("enabled=%s" % ('true' if enabled else 'false'))
+        if settings:
+            import json as jn
+            parts.append("settings='%s'::jsonb" % jn.dumps(settings, ensure_ascii=False).replace("'", "''"))
+        if parts:
+            parts.append("updated_at=NOW()")
+            cur.execute("UPDATE notification_channels SET %s WHERE channel='%s'" % (', '.join(parts), channel))
+            conn.commit()
+        return {'success': True}
+
+    if action == 'telegram_subscribers':
+        cur.execute("""SELECT ts.id, ts.user_id, u.name, ts.chat_id, ts.username, ts.first_name, ts.subscribed_at, ts.active
+            FROM telegram_subscribers ts LEFT JOIN users u ON u.id=ts.user_id
+            WHERE ts.active=true ORDER BY ts.subscribed_at DESC""")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+        return rows
+
+    if action == 'send_telegram':
+        title = body.get('title', '').strip()
+        msg_body = body.get('body', '').strip()
+        target = body.get('target', 'all')
+        target_user_ids = body.get('target_user_ids', [])
+        if not msg_body:
+            return {'error': 'Введите текст сообщения'}
+
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Канал Telegram не настроен'}
+        ch_settings = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        bot_token = ch_settings.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Не указан токен бота Telegram'}
+
+        text = title + '\n\n' + msg_body if title else msg_body
+
+        if target == 'all':
+            cur.execute("SELECT id, user_id, chat_id FROM telegram_subscribers WHERE active=true")
+        elif target == 'selected' and target_user_ids:
+            ids_str = ','.join(str(int(i)) for i in target_user_ids)
+            cur.execute("SELECT id, user_id, chat_id FROM telegram_subscribers WHERE user_id IN (%s) AND active=true" % ids_str)
+        else:
+            return {'error': 'Неверный тип рассылки'}
+
+        subs = cur.fetchall()
+        cur.execute("""INSERT INTO notification_history (channel, title, body, target, target_user_ids, created_by, status)
+            VALUES ('telegram', '%s', '%s', '%s', %s, %d, 'sending') RETURNING id""" % (
+            title.replace("'", "''"), msg_body.replace("'", "''"), target.replace("'", "''"),
+            "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_user_ids) if target_user_ids else 'NULL',
+            staff['user_id']))
+        notif_id = cur.fetchone()[0]
+        conn.commit()
+
+        sent = 0
+        failed = 0
+        for sub_row in subs:
+            sub_id, user_id, chat_id = sub_row
+            try:
+                url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
+                data = json.dumps({'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}).encode('utf-8')
+                req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+                resp = urllib.request.urlopen(req, timeout=10)
+                resp.read()
+                sent += 1
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status) VALUES (%d, %s, 'telegram', 'sent')" % (notif_id, user_id or 'NULL'))
+            except Exception as e:
+                failed += 1
+                err = str(e).replace("'", "''")[:500]
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status, error_text) VALUES (%d, %s, 'telegram', 'failed', '%s')" % (notif_id, user_id or 'NULL', err))
+
+        cur.execute("UPDATE notification_history SET status='sent', sent_count=%d, failed_count=%d, sent_at=NOW() WHERE id=%d" % (sent, failed, notif_id))
+        conn.commit()
+        return {'success': True, 'notification_id': notif_id, 'sent': sent, 'failed': failed}
+
+    if action == 'send_email':
+        title = body.get('title', '').strip()
+        msg_body = body.get('body', '').strip()
+        target = body.get('target', 'all')
+        target_user_ids = body.get('target_user_ids', [])
+        if not title or not msg_body:
+            return {'error': 'Заполните заголовок и текст'}
+
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='email'")
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Канал Email не настроен'}
+        ch_settings = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        smtp_host = ch_settings.get('smtp_host', '')
+        smtp_port = int(ch_settings.get('smtp_port', 587))
+        smtp_user = ch_settings.get('smtp_user', '')
+        smtp_pass = ch_settings.get('smtp_pass', '')
+        from_email = ch_settings.get('from_email', '')
+        from_name = ch_settings.get('from_name', '')
+        if not smtp_host or not smtp_user or not from_email:
+            return {'error': 'SMTP не настроен. Заполните настройки Email'}
+
+        if target == 'all':
+            cur.execute("SELECT id, name, email FROM users WHERE email IS NOT NULL AND email != '' AND status='active'")
+        elif target == 'selected' and target_user_ids:
+            ids_str = ','.join(str(int(i)) for i in target_user_ids)
+            cur.execute("SELECT id, name, email FROM users WHERE id IN (%s) AND email IS NOT NULL AND email != ''" % ids_str)
+        else:
+            return {'error': 'Неверный тип рассылки'}
+
+        recipients = cur.fetchall()
+        cur.execute("""INSERT INTO notification_history (channel, title, body, target, target_user_ids, created_by, status)
+            VALUES ('email', '%s', '%s', '%s', %s, %d, 'sending') RETURNING id""" % (
+            title.replace("'", "''"), msg_body.replace("'", "''"), target.replace("'", "''"),
+            "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_user_ids) if target_user_ids else 'NULL',
+            staff['user_id']))
+        notif_id = cur.fetchone()[0]
+        conn.commit()
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        sent = 0
+        failed = 0
+        for rec in recipients:
+            user_id, user_name, user_email = rec
+            try:
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = title
+                msg['From'] = '%s <%s>' % (from_name, from_email) if from_name else from_email
+                msg['To'] = user_email
+                html_body = '<html><body><p>%s</p></body></html>' % msg_body.replace('\n', '<br>')
+                msg.attach(MIMEText(msg_body, 'plain', 'utf-8'))
+                msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.sendmail(from_email, [user_email], msg.as_string())
+                sent += 1
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status) VALUES (%d, %d, 'email', 'sent')" % (notif_id, user_id))
+            except Exception as e:
+                failed += 1
+                err = str(e).replace("'", "''")[:500]
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status, error_text) VALUES (%d, %d, 'email', 'failed', '%s')" % (notif_id, user_id, err))
+
+        cur.execute("UPDATE notification_history SET status='sent', sent_count=%d, failed_count=%d, sent_at=NOW() WHERE id=%d" % (sent, failed, notif_id))
+        conn.commit()
+        return {'success': True, 'notification_id': notif_id, 'sent': sent, 'failed': failed}
+
+    if action == 'history':
+        channel = params.get('channel', '')
+        limit = int(params.get('limit', 50))
+        offset = int(params.get('offset', 0))
+        where = "WHERE nh.channel='%s'" % channel.replace("'", "''") if channel else ""
+        cur.execute("""SELECT nh.*, u.name as created_by_name
+            FROM notification_history nh LEFT JOIN users u ON u.id=nh.created_by
+            %s ORDER BY nh.created_at DESC LIMIT %d OFFSET %d""" % (where, limit, offset))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+                elif isinstance(v, Decimal):
+                    r[k] = float(v)
+        count_sql = "SELECT COUNT(*) FROM notification_history" + (" WHERE channel='%s'" % channel.replace("'", "''") if channel else "")
+        cur.execute(count_sql)
+        total = cur.fetchone()[0]
+        return {'items': rows, 'total': total}
+
+    if action == 'history_log':
+        notif_id = int(params.get('id', body.get('id', 0)))
+        if not notif_id:
+            return {'error': 'Не указан ID уведомления'}
+        cur.execute("""SELECT nhl.*, u.name as user_name
+            FROM notification_history_log nhl LEFT JOIN users u ON u.id=nhl.user_id
+            WHERE nhl.notification_id=%d ORDER BY nhl.created_at DESC""" % notif_id)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+        return rows
+
+    if action == 'stats':
+        cur.execute("SELECT COUNT(*) FROM telegram_subscribers WHERE active=true")
+        tg_subs = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM users WHERE email IS NOT NULL AND email != '' AND status='active'")
+        email_users = cur.fetchone()[0]
+        cur.execute("SELECT channel, COUNT(*) as cnt FROM notification_history GROUP BY channel")
+        channel_counts = {}
+        for r in cur.fetchall():
+            channel_counts[r[0]] = r[1]
+        return {
+            'telegram_subscribers': tg_subs,
+            'email_users': email_users,
+            'telegram_messages': channel_counts.get('telegram', 0),
+            'email_messages': channel_counts.get('email', 0)
+        }
+
+    if action == 'test_telegram':
+        chat_id = body.get('chat_id', '')
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='telegram'")
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Канал не настроен'}
+        ch_settings = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        bot_token = ch_settings.get('bot_token', '')
+        if not bot_token:
+            return {'error': 'Не указан токен бота'}
+        if not chat_id:
+            return {'error': 'Не указан chat_id'}
+        try:
+            url = 'https://api.telegram.org/bot%s/sendMessage' % bot_token
+            data = json.dumps({'chat_id': int(chat_id), 'text': 'Тестовое уведомление из системы'}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=10)
+            resp.read()
+            return {'success': True}
+        except Exception as e:
+            return {'error': 'Ошибка отправки: %s' % str(e)}
+
+    if action == 'test_email':
+        to_email = body.get('to_email', '').strip()
+        if not to_email:
+            return {'error': 'Укажите email для теста'}
+        cur.execute("SELECT settings FROM notification_channels WHERE channel='email'")
+        row = cur.fetchone()
+        if not row:
+            return {'error': 'Канал не настроен'}
+        ch_settings = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        smtp_host = ch_settings.get('smtp_host', '')
+        smtp_port = int(ch_settings.get('smtp_port', 587))
+        smtp_user = ch_settings.get('smtp_user', '')
+        smtp_pass = ch_settings.get('smtp_pass', '')
+        from_email = ch_settings.get('from_email', '')
+        from_name = ch_settings.get('from_name', '')
+        if not smtp_host or not smtp_user or not from_email:
+            return {'error': 'SMTP не настроен'}
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            msg = MIMEText('Тестовое уведомление из системы', 'plain', 'utf-8')
+            msg['Subject'] = 'Тестовое уведомление'
+            msg['From'] = '%s <%s>' % (from_name, from_email) if from_name else from_email
+            msg['To'] = to_email
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, [to_email], msg.as_string())
+            return {'success': True}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    return {'error': 'Неизвестное действие: %s' % action}
+
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}
 
 def handler(event, context):
@@ -4476,7 +4758,7 @@ def handler(event, context):
             staff = get_staff_session(params, ev_headers, cur)
             if not staff:
                 return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'Требуется авторизация'})}
-        elif entity == 'push':
+        elif entity in ('push', 'notifications'):
             staff = get_staff_session(params, ev_headers, cur)
 
         if entity == 'dashboard':
@@ -4509,6 +4791,8 @@ def handler(event, context):
             result = handle_cabinet(method, params, body, ev_headers, cur)
         elif entity == 'push':
             result = handle_push(method, params, body, staff, cur, conn, src_ip)
+        elif entity == 'notifications':
+            result = handle_notifications(method, params, body, staff, cur, conn)
         elif entity == 'dadata':
             result = handle_dadata(body)
         elif entity == 'cron':
