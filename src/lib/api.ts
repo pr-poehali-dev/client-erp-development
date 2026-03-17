@@ -278,6 +278,13 @@ export const api = {
     webhookInfo: () => request<{ url: string; has_custom_certificate: boolean; pending_update_count: number; last_error_date?: number; last_error_message?: string }>("POST", undefined, { entity: "notifications", action: "webhook_info" }),
     getTelegramSettings: () => request<Record<string, string>>("GET", { entity: "notifications", action: "get_telegram_settings" }),
     saveTelegramSettings: (settings: Record<string, string>) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "save_telegram_settings", settings }),
+    maxSubscribers: () => request<TelegramSubscriber[]>("GET", { entity: "notifications", action: "max_subscribers" }),
+    sendMax: (data: { title?: string; body: string; target?: string; target_user_ids?: number[] }) =>
+      request<{ success: boolean; notification_id: number; sent: number; failed: number }>("POST", undefined, { entity: "notifications", action: "send_max", ...data }),
+    testMax: (chat_id: string) => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "test_max", chat_id }),
+    setMaxWebhook: (webhookUrl?: string) => request<{ success: boolean; webhook_url: string }>("POST", undefined, { entity: "notifications", action: "set_max_webhook", webhook_url: webhookUrl }),
+    deleteMaxWebhook: () => request<{ success: boolean }>("POST", undefined, { entity: "notifications", action: "delete_max_webhook" }),
+    maxWebhookInfo: () => request<{ url: string; update_types?: string[]; error?: string }>("POST", undefined, { entity: "notifications", action: "max_webhook_info" }),
   },
 
   organizations: {
@@ -936,8 +943,10 @@ export interface NotificationLogEntry {
 
 export interface NotificationStats {
   telegram_subscribers: number;
+  max_subscribers: number;
   email_users: number;
   telegram_messages: number;
+  max_messages: number;
   email_messages: number;
 }
 

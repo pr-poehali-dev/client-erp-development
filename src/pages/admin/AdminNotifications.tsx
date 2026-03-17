@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Icon from "@/components/ui/icon";
 import AdminPushMessages from "./AdminPushMessages";
 import AdminTelegramTab from "./AdminTelegramTab";
+import AdminMaxTab from "./AdminMaxTab";
 import AdminEmailTab from "./AdminEmailTab";
 
 const AdminNotifications = () => {
@@ -20,6 +21,10 @@ const AdminNotifications = () => {
             <Icon name="Send" size={15} />
             Telegram
           </TabsTrigger>
+          <TabsTrigger value="max" className="flex items-center gap-1.5">
+            <Icon name="MessageCircle" size={15} />
+            MAX
+          </TabsTrigger>
           <TabsTrigger value="email" className="flex items-center gap-1.5">
             <Icon name="Mail" size={15} />
             Email
@@ -32,6 +37,10 @@ const AdminNotifications = () => {
 
         <TabsContent value="telegram" className="mt-4">
           <AdminTelegramTab />
+        </TabsContent>
+
+        <TabsContent value="max" className="mt-4">
+          <AdminMaxTab />
         </TabsContent>
 
         <TabsContent value="email" className="mt-4">

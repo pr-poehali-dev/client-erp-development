@@ -4565,7 +4565,7 @@ def handle_notifications(method, params, body, staff, cur, conn):
         channel = body.get('channel', '')
         enabled = body.get('enabled')
         settings = body.get('settings', {})
-        if channel not in ('push', 'telegram', 'email'):
+        if channel not in ('push', 'telegram', 'email', 'max'):
             return {'error': 'Неизвестный канал'}
         parts = []
         if enabled is not None:
@@ -4757,6 +4757,8 @@ def handle_notifications(method, params, body, staff, cur, conn):
     if action == 'stats':
         cur.execute("SELECT COUNT(*) FROM telegram_subscribers WHERE active=true")
         tg_subs = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM max_subscribers WHERE active=true")
+        max_subs = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM users WHERE email IS NOT NULL AND email != '' AND status='active'")
         email_users = cur.fetchone()[0]
         cur.execute("SELECT channel, COUNT(*) as cnt FROM notification_history GROUP BY channel")
@@ -4765,8 +4767,10 @@ def handle_notifications(method, params, body, staff, cur, conn):
             channel_counts[r[0]] = r[1]
         return {
             'telegram_subscribers': tg_subs,
+            'max_subscribers': max_subs,
             'email_users': email_users,
             'telegram_messages': channel_counts.get('telegram', 0),
+            'max_messages': channel_counts.get('max', 0),
             'email_messages': channel_counts.get('email', 0)
         }
 
@@ -4821,6 +4825,127 @@ def handle_notifications(method, params, body, staff, cur, conn):
                 server.login(smtp_user, smtp_pass)
                 server.sendmail(from_email, [to_email], msg.as_string())
             return {'success': True}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    if action == 'max_subscribers':
+        cur.execute("""SELECT ms.id, ms.user_id, u.name, ms.chat_id, ms.username, ms.first_name, ms.subscribed_at, ms.active
+            FROM max_subscribers ms LEFT JOIN users u ON u.id=ms.user_id
+            WHERE ms.active=true ORDER BY ms.subscribed_at DESC""")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, (datetime, date)):
+                    r[k] = v.isoformat()
+        return rows
+
+    if action == 'send_max':
+        title = body.get('title', '').strip()
+        msg_body = body.get('body', '').strip()
+        target = body.get('target', 'all')
+        target_user_ids = body.get('target_user_ids', [])
+        if not msg_body:
+            return {'error': 'Введите текст сообщения'}
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'error': 'Токен MAX-бота не настроен'}
+        text = title + '\n\n' + msg_body if title else msg_body
+        if target == 'all':
+            cur.execute("SELECT id, user_id, chat_id FROM max_subscribers WHERE active=true")
+        elif target == 'selected' and target_user_ids:
+            ids_str = ','.join(str(int(i)) for i in target_user_ids)
+            cur.execute("SELECT id, user_id, chat_id FROM max_subscribers WHERE user_id IN (%s) AND active=true" % ids_str)
+        else:
+            return {'error': 'Неверный тип рассылки'}
+        subs = cur.fetchall()
+        cur.execute("""INSERT INTO notification_history (channel, title, body, target, target_user_ids, created_by, status)
+            VALUES ('max', '%s', '%s', '%s', %s, %d, 'sending') RETURNING id""" % (
+            title.replace("'", "''"), msg_body.replace("'", "''"), target.replace("'", "''"),
+            "ARRAY[%s]::integer[]" % ','.join(str(int(i)) for i in target_user_ids) if target_user_ids else 'NULL',
+            staff['user_id']))
+        notif_id = cur.fetchone()[0]
+        conn.commit()
+        sent = 0
+        failed = 0
+        for sub_row in subs:
+            sub_id, user_id, chat_id = sub_row
+            try:
+                url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(bot_token), chat_id)
+                data = json.dumps({'text': text, 'format': 'html'}).encode('utf-8')
+                req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+                resp = urllib.request.urlopen(req, timeout=10)
+                resp.read()
+                sent += 1
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status) VALUES (%d, %s, 'max', 'sent')" % (notif_id, user_id or 'NULL'))
+            except Exception as e:
+                failed += 1
+                err = str(e).replace("'", "''")[:500]
+                cur.execute("INSERT INTO notification_history_log (notification_id, user_id, channel, status, error_text) VALUES (%d, %s, 'max', 'failed', '%s')" % (notif_id, user_id or 'NULL', err))
+        cur.execute("UPDATE notification_history SET status='sent', sent_count=%d, failed_count=%d, sent_at=NOW() WHERE id=%d" % (sent, failed, notif_id))
+        conn.commit()
+        return {'success': True, 'notification_id': notif_id, 'sent': sent, 'failed': failed}
+
+    if action == 'test_max':
+        chat_id = body.get('chat_id', '')
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'error': 'Токен MAX-бота не настроен'}
+        if not chat_id:
+            return {'error': 'Не указан chat_id'}
+        try:
+            url = 'https://botapi.max.ru/messages?access_token=%s&chat_id=%s' % (urllib.parse.quote(bot_token), int(chat_id))
+            data = json.dumps({'text': 'Тестовое уведомление из системы'}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=10)
+            resp.read()
+            return {'success': True}
+        except Exception as e:
+            return {'error': 'Ошибка отправки: %s' % str(e)}
+
+    if action == 'set_max_webhook':
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'error': 'Токен MAX-бота не найден'}
+        api_base = os.environ.get('API_URL', 'https://functions.poehali.dev/f35e253c-613f-4ad6-8deb-2c20b4c5d450')
+        webhook_url = body.get('webhook_url', '') or '%s?entity=max_bot' % api_base
+        try:
+            url = 'https://botapi.max.ru/subscriptions?access_token=%s' % urllib.parse.quote(bot_token)
+            data = json.dumps({'url': webhook_url, 'update_types': ['bot_started', 'message_created']}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            return {'success': True, 'max_result': result, 'webhook_url': webhook_url}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    if action == 'delete_max_webhook':
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'error': 'Токен MAX-бота не найден'}
+        try:
+            url = 'https://botapi.max.ru/subscriptions?access_token=%s' % urllib.parse.quote(bot_token)
+            req = urllib.request.Request(url, method='DELETE')
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            return {'success': True, 'max_result': result}
+        except Exception as e:
+            return {'error': 'Ошибка: %s' % str(e)}
+
+    if action == 'max_webhook_info':
+        bot_token = os.environ.get('MAX_BOT_TOKEN', '')
+        if not bot_token:
+            return {'url': '', 'error': 'Токен MAX-бота не найден'}
+        try:
+            url = 'https://botapi.max.ru/subscriptions?access_token=%s' % urllib.parse.quote(bot_token)
+            req = urllib.request.Request(url)
+            resp = urllib.request.urlopen(req, timeout=10)
+            result = json.loads(resp.read().decode('utf-8'))
+            subs = result.get('subscriptions', [])
+            if subs:
+                s = subs[0]
+                return {'url': s.get('url', ''), 'update_types': s.get('update_types', [])}
+            return {'url': ''}
         except Exception as e:
             return {'error': 'Ошибка: %s' % str(e)}
 
