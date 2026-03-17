@@ -4403,6 +4403,26 @@ def handle_push(method, params, body, staff, cur, conn, src_ip=''):
                     r[k] = v.isoformat()
         return rows
 
+    if action == 'get_settings':
+        cur.execute("SELECT key, value FROM push_settings")
+        rows = cur.fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    if action == 'save_settings':
+        settings = body.get('settings', {})
+        allowed = {'enabled', 'reminder_days', 'overdue_notify', 'remind_time'}
+        for k, v in settings.items():
+            if k not in allowed:
+                continue
+            val = str(v).replace("'", "''")
+            cur.execute("SELECT id FROM push_settings WHERE key='%s'" % k)
+            if cur.fetchone():
+                cur.execute("UPDATE push_settings SET value='%s', updated_at=NOW() WHERE key='%s'" % (val, k))
+            else:
+                cur.execute("INSERT INTO push_settings (key, value) VALUES ('%s', '%s')" % (k, val))
+        conn.commit()
+        return {'success': True}
+
     return {'error': 'Неизвестное действие: %s' % action}
 
 PROTECTED_ENTITIES = {'dashboard', 'members', 'loans', 'savings', 'shares', 'export', 'users', 'audit', 'org_settings', 'organizations'}

@@ -172,7 +172,20 @@ def accrue_penalties(cur, check_date):
     }
 
 
+def get_push_settings(cur):
+    try:
+        cur.execute("SELECT key, value FROM push_settings")
+        return {r[0]: r[1] for r in cur.fetchall()}
+    except Exception:
+        return {'enabled': 'true', 'reminder_days': '3,1,0', 'overdue_notify': 'true', 'remind_time': '09:00'}
+
+
 def send_payment_reminders(cur, conn, check_date):
+    settings = get_push_settings(cur)
+
+    if settings.get('enabled', 'true') != 'true':
+        return {'skipped': True, 'reason': 'Push reminders disabled'}
+
     vapid_private = os.environ.get('VAPID_PRIVATE_KEY', '')
     vapid_public = os.environ.get('VAPID_PUBLIC_KEY', '')
     vapid_email = os.environ.get('VAPID_EMAIL', 'mailto:admin@example.com')
@@ -184,28 +197,48 @@ def send_payment_reminders(cur, conn, check_date):
     except ImportError:
         return {'skipped': True, 'reason': 'pywebpush not installed'}
 
-    today = check_date
-    three_days = (date.fromisoformat(today) + timedelta(days=3)).isoformat() if isinstance(today, str) else (today + timedelta(days=3)).isoformat()
-    if isinstance(today, date) and not isinstance(today, str):
-        today = today.isoformat()
+    today_str = check_date if isinstance(check_date, str) else check_date.isoformat()
+    today_date = date.fromisoformat(today_str) if isinstance(check_date, str) else check_date
 
-    reminders = [
-        ('reminder_3d', three_days, three_days, 'pending',
-         'Платёж через 3 дня',
-         'До даты платежа по займу %s осталось 3 дня. Сумма: %s руб.'),
-        ('reminder_today', today, today, 'pending',
-         'Платёж сегодня',
-         'Сегодня дата платежа по займу %s. Сумма: %s руб.'),
-        ('overdue_1d', today, today, 'overdue',
-         'Просрочка платежа',
-         'Платёж по займу %s просрочен. Сумма: %s руб. Во избежание пени оплатите как можно скорее.'),
-    ]
+    reminder_days_str = settings.get('reminder_days', '3,1,0')
+    reminder_days = []
+    for d in reminder_days_str.split(','):
+        d = d.strip()
+        if d.isdigit():
+            reminder_days.append(int(d))
+
+    overdue_enabled = settings.get('overdue_notify', 'true') == 'true'
+
+    reminders = []
+    for days in reminder_days:
+        target_date = (today_date + timedelta(days=days)).isoformat()
+        if days == 0:
+            reminders.append(
+                ('reminder_today', target_date, 'pending',
+                 'Платёж сегодня',
+                 'Сегодня дата платежа по займу %s. Сумма: %s руб.'))
+        elif days == 1:
+            reminders.append(
+                ('reminder_1d', target_date, 'pending',
+                 'Платёж завтра',
+                 'До даты платежа по займу %s остался 1 день. Сумма: %s руб.'))
+        else:
+            reminders.append(
+                ('reminder_%dd' % days, target_date, 'pending',
+                 'Платёж через %d дн.' % days,
+                 'До даты платежа по займу %%s осталось %d дн. Сумма: %%s руб.' % days))
+
+    if overdue_enabled:
+        reminders.append(
+            ('overdue_1d', today_str, 'overdue',
+             'Просрочка платежа',
+             'Платёж по займу %s просрочен. Сумма: %s руб. Во избежание пени оплатите как можно скорее.'))
 
     sent_total = 0
     failed_total = 0
     errors = []
 
-    for rtype, date_from, date_to, sched_status, title_tpl, body_tpl in reminders:
+    for rtype, target_date, sched_status, title_tpl, body_tpl in reminders:
         cur.execute("""
             SELECT ls.id, ls.loan_id, ls.payment_amount, l.contract_no, l.member_id
             FROM loan_schedule ls
@@ -213,7 +246,7 @@ def send_payment_reminders(cur, conn, check_date):
             WHERE ls.payment_date = '%s'
               AND ls.status = '%s'
               AND COALESCE(ls.paid_amount, 0) < ls.payment_amount
-        """ % (date_from, sched_status))
+        """ % (target_date, sched_status))
         schedules = cur.fetchall()
 
         for ls_id, loan_id, pay_amount, contract_no, member_id in schedules:

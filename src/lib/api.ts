@@ -245,6 +245,8 @@ export const api = {
     send: (data: { title: string; body: string; url?: string; target?: string; target_user_ids?: number[] }) =>
       request<{ success: boolean; message_id: number; sent: number; failed: number }>("POST", undefined, { entity: "push", action: "send", ...data }),
     messageLog: (id: number) => request<PushMessageLogEntry[]>("GET", { entity: "push", action: "message_log", id }),
+    getSettings: () => request<PushSettings>("GET", { entity: "push", action: "get_settings" }),
+    saveSettings: (settings: Partial<PushSettings>) => request<{ success: boolean }>("POST", undefined, { entity: "push", action: "save_settings", settings }),
   },
 
   organizations: {
@@ -832,6 +834,13 @@ export interface PushMessageLogEntry {
   status: string;
   error_text: string | null;
   created_at: string;
+}
+
+export interface PushSettings {
+  enabled: string;
+  reminder_days: string;
+  overdue_notify: string;
+  remind_time: string;
 }
 
 export default api;

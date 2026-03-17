@@ -12,7 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import api, { PushStats, PushSubscriber, PushMessage, PushMessageLogEntry } from "@/lib/api";
+import { Switch } from "@/components/ui/switch";
+import api, { PushStats, PushSubscriber, PushMessage, PushMessageLogEntry, PushSettings } from "@/lib/api";
 
 const fmtDate = (d: string) => {
   if (!d) return "—";
@@ -41,20 +42,24 @@ const AdminPushMessages = () => {
   const [logEntries, setLogEntries] = useState<PushMessageLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("send");
+  const [settings, setSettings] = useState<PushSettings>({ enabled: "true", reminder_days: "3,1,0", overdue_notify: "true", remind_time: "09:00" });
+  const [savingSettings, setSavingSettings] = useState(false);
   const { toast } = useToast();
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [s, sub, m] = await Promise.all([
+      const [s, sub, m, st] = await Promise.all([
         api.push.stats(),
         api.push.subscribers(),
         api.push.messages(50, 0),
+        api.push.getSettings(),
       ]);
       setStats(s);
       setSubscribers(sub);
       setMessages(m.items);
       setMessagesTotal(m.total);
+      if (st && st.enabled !== undefined) setSettings(st);
     } catch (e) {
       toast({ title: "Ошибка загрузки", description: String(e), variant: "destructive" });
     }
@@ -108,6 +113,26 @@ const AdminPushMessages = () => {
     setSelectedUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
   };
 
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await api.push.saveSettings(settings);
+      toast({ title: "Настройки сохранены" });
+    } catch (e) {
+      toast({ title: "Ошибка", description: String(e), variant: "destructive" });
+    }
+    setSavingSettings(false);
+  };
+
+  const reminderDays = settings.reminder_days.split(",").map(d => d.trim()).filter(Boolean);
+  const toggleDay = (day: string) => {
+    const current = new Set(reminderDays);
+    if (current.has(day)) current.delete(day);
+    else current.add(day);
+    const sorted = Array.from(current).map(Number).sort((a, b) => b - a).map(String);
+    setSettings({ ...settings, reminder_days: sorted.join(",") });
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center py-12">
       <Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" />
@@ -158,6 +183,7 @@ const AdminPushMessages = () => {
             <TabsTrigger value="send">Отправить</TabsTrigger>
             <TabsTrigger value="history">История ({messagesTotal})</TabsTrigger>
             <TabsTrigger value="subscribers">Подписчики ({subscribers.length})</TabsTrigger>
+            <TabsTrigger value="settings">Настройки</TabsTrigger>
           </TabsList>
         </div>
 
@@ -291,6 +317,61 @@ const AdminPushMessages = () => {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="settings" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Icon name="Settings" size={18} />
+                Автоматические напоминания о платежах
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-sm">Автоматические push-напоминания</div>
+                  <div className="text-xs text-muted-foreground">Клиенты получают уведомления о предстоящих и просроченных платежах</div>
+                </div>
+                <Switch checked={settings.enabled === "true"} onCheckedChange={v => setSettings({ ...settings, enabled: v ? "true" : "false" })} />
+              </div>
+
+              {settings.enabled === "true" && (
+                <>
+                  <div className="space-y-2">
+                    <Label>За сколько дней напоминать</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {["7", "5", "3", "2", "1", "0"].map(day => (
+                        <Button key={day} variant={reminderDays.includes(day) ? "default" : "outline"} size="sm" onClick={() => toggleDay(day)} className="min-w-[80px]">
+                          {day === "0" ? "В день платежа" : `За ${day} дн.`}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Выбрано: {reminderDays.length === 0 ? "ничего" : reminderDays.map(d => d === "0" ? "в день платежа" : `за ${d} дн.`).join(", ")}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-sm">Уведомлять о просрочке</div>
+                      <div className="text-xs text-muted-foreground">Отправлять push при наступлении просрочки платежа</div>
+                    </div>
+                    <Switch checked={settings.overdue_notify === "true"} onCheckedChange={v => setSettings({ ...settings, overdue_notify: v ? "true" : "false" })} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Время отправки</Label>
+                    <Input type="time" value={settings.remind_time} onChange={e => setSettings({ ...settings, remind_time: e.target.value })} className="w-32" />
+                    <p className="text-xs text-muted-foreground">Время по Москве, в которое будут отправляться автоматические напоминания</p>
+                  </div>
+                </>
+              )}
+
+              <Button onClick={handleSaveSettings} disabled={savingSettings}>
+                {savingSettings ? <Icon name="Loader2" size={16} className="animate-spin mr-2" /> : <Icon name="Save" size={16} className="mr-2" />}
+                Сохранить настройки
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
