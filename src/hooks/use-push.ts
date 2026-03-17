@@ -10,6 +10,13 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 export function usePush(token: string) {
   const [supported, setSupported] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>("default");
@@ -41,11 +48,22 @@ export function usePush(token: string) {
       const { vapid_public_key } = await api.push.vapidKey();
       if (!vapid_public_key) { setLoading(false); return false; }
 
+      const newKey = urlBase64ToUint8Array(vapid_public_key);
       let sub = await reg.pushManager.getSubscription();
+
+      if (sub) {
+        const existingKey = sub.options.applicationServerKey;
+        const existingKeyStr = existingKey ? arrayBufferToBase64(existingKey) : "";
+        if (existingKeyStr !== vapid_public_key) {
+          await sub.unsubscribe();
+          sub = null;
+        }
+      }
+
       if (!sub) {
         sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapid_public_key),
+          applicationServerKey: newKey,
         });
       }
 
