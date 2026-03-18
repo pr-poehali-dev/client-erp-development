@@ -1,0 +1,1 @@
+ALTER TABLE loan_payments ADD COLUMN manual_distribution BOOLEAN NOT NULL DEFAULT FALSE;

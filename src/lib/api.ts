@@ -62,7 +62,7 @@ export const api = {
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_contract", loan_id: loanId }),
     deleteAllPayments: (loanId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_all_payments", loan_id: loanId }),
-    updatePayment: (data: { payment_id: number; payment_date?: string; amount?: number; principal_part?: number; interest_part?: number; penalty_part?: number }) =>
+    updatePayment: (data: { payment_id: number; payment_date?: string; amount?: number; principal_part?: number; interest_part?: number; penalty_part?: number; manual_distribution?: boolean }) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "update_payment", ...data }),
     deletePayment: (paymentId: number) =>
       request<{ success: boolean }>("POST", undefined, { entity: "loans", action: "delete_payment", payment_id: paymentId }),
@@ -473,6 +473,8 @@ export interface LoanPayment {
   interest_part: number;
   penalty_part: number;
   payment_type: string;
+  manual_distribution?: boolean;
+  description?: string;
 }
 
 export interface CreateLoanData {

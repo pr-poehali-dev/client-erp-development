@@ -39,8 +39,8 @@ interface LoansActionDialogsProps {
 
   showEditPayment: boolean;
   setShowEditPayment: (v: boolean) => void;
-  editPayForm: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string };
-  setEditPayForm: (v: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string }) => void;
+  editPayForm: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean };
+  setEditPayForm: (v: { payment_id: number; payment_date: string; amount: string; principal_part: string; interest_part: string; penalty_part: string; manual_distribution: boolean }) => void;
   handleEditPayment: () => void;
 
   showOverpayChoice: boolean;
@@ -140,9 +140,28 @@ const LoansActionDialogs = (props: LoansActionDialogsProps) => {
           <div className="space-y-2">
             <div><Label>Дата</Label><Input type="date" value={props.editPayForm.payment_date} onChange={e => props.setEditPayForm({ ...props.editPayForm, payment_date: e.target.value })} /></div>
             <div><Label>Сумма</Label><Input type="number" value={props.editPayForm.amount} onChange={e => props.setEditPayForm({ ...props.editPayForm, amount: e.target.value })} /></div>
+            <div className="flex items-center gap-2 py-1">
+              <input type="checkbox" id="manual_dist" checked={props.editPayForm.manual_distribution} onChange={e => props.setEditPayForm({ ...props.editPayForm, manual_distribution: e.target.checked })} className="h-4 w-4 rounded border-gray-300" />
+              <Label htmlFor="manual_dist" className="cursor-pointer text-sm font-medium">Ручное распределение средств</Label>
+            </div>
+            {props.editPayForm.manual_distribution && (
+              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                Распределение будет сохранено как есть и не будет пересчитано автоматически
+              </div>
+            )}
             <div><Label>Основной долг</Label><Input type="number" value={props.editPayForm.principal_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, principal_part: e.target.value })} /></div>
             <div><Label>Проценты</Label><Input type="number" value={props.editPayForm.interest_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, interest_part: e.target.value })} /></div>
             <div><Label>Штрафы</Label><Input type="number" value={props.editPayForm.penalty_part} onChange={e => props.setEditPayForm({ ...props.editPayForm, penalty_part: e.target.value })} /></div>
+            {props.editPayForm.manual_distribution && (() => {
+              const total = parseFloat(props.editPayForm.amount || "0");
+              const parts = parseFloat(props.editPayForm.principal_part || "0") + parseFloat(props.editPayForm.interest_part || "0") + parseFloat(props.editPayForm.penalty_part || "0");
+              const diff = Math.abs(total - parts);
+              return diff > 0.01 ? (
+                <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
+                  Сумма частей ({parts.toFixed(2)} ₽) не совпадает с общей суммой ({total.toFixed(2)} ₽). Разница: {diff.toFixed(2)} ₽
+                </div>
+              ) : null;
+            })()}
           </div>
           <DialogFooter><Button onClick={props.handleEditPayment} disabled={saving}>Сохранить</Button></DialogFooter>
         </DialogContent>

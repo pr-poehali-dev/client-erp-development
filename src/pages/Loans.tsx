@@ -71,7 +71,7 @@ const Loans = () => {
   const [modifyPreview, setModifyPreview] = useState<ScheduleItem[] | null>(null);
   const [modifyMonthly, setModifyMonthly] = useState(0);
   const [showEditPayment, setShowEditPayment] = useState(false);
-  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "" });
+  const [editPayForm, setEditPayForm] = useState({ payment_id: 0, payment_date: "", amount: "", principal_part: "", interest_part: "", penalty_part: "", manual_distribution: false });
   const [showOverpayChoice, setShowOverpayChoice] = useState(false);
   const [overpayOptions, setOverpayOptions] = useState<Record<string, { new_monthly: number; new_term: number; description: string }>>({});
   const [overpayInfo, setOverpayInfo] = useState({ overpay_amount: 0, current_payment: 0, total_amount: 0 });
@@ -265,6 +265,7 @@ const Loans = () => {
         principal_part: editPayForm.principal_part ? toNum(editPayForm.principal_part) : undefined,
         interest_part: editPayForm.interest_part ? toNum(editPayForm.interest_part) : undefined,
         penalty_part: editPayForm.penalty_part ? toNum(editPayForm.penalty_part) : undefined,
+        manual_distribution: editPayForm.manual_distribution,
       });
       toast({ title: "Платёж изменён" });
       setShowEditPayment(false);
@@ -299,6 +300,7 @@ const Loans = () => {
       principal_part: String(p.principal_part),
       interest_part: String(p.interest_part),
       penalty_part: String(p.penalty_part),
+      manual_distribution: !!p.manual_distribution,
     });
     setShowEditPayment(true);
   };
