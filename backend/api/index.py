@@ -418,6 +418,7 @@ def handle_members(method, params, body, cur, conn, staff=None, ip=''):
         cur.execute("SELECT COUNT(*) FROM share_accounts WHERE member_id=%s AND status='active'" % member_id)
         if cur.fetchone()[0] > 0:
             return {'error': 'Нельзя удалить пайщика с активными паевыми счетами'}
+        cur.execute("DELETE FROM users WHERE member_id=%s" % member_id)
         cur.execute("DELETE FROM members WHERE id=%s" % member_id)
         audit_log(cur, staff, 'delete', 'member', member_id, member_no, member_name, ip)
         conn.commit()
